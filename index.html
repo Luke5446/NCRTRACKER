@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tibard NCR Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1E2A3A;         /* deep navy — workwear ink */
+  --chambray:#3E5C76;    /* chambray blue accent */
+  --paper:#F2F4F6;       /* cool paper background */
+  --card:#FFFFFF;
+  --line:#D8DEE4;
+  --muted:#67707B;
+  --open:#D9822B;        /* amber — open */
+  --prog:#3E5C76;        /* chambray — in progress */
+  --closed:#3E7C4F;      /* green — closed */
+  --flag:#C4453C;        /* QC reject red — stale */
+  --tagbg:#EDF1F5;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
+button{font:inherit;cursor:pointer;background:none;border:none;color:inherit}
+a{color:var(--chambray)}
+:focus-visible{outline:3px solid var(--chambray);outline-offset:2px;border-radius:4px}
+
+/* ---------- header ---------- */
+header{background:var(--ink);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.brand{font-family:'Archivo',sans-serif;font-weight:800;font-size:1.15rem;letter-spacing:.02em;text-transform:uppercase}
+.brand span{color:#9FB6CC;font-weight:600}
+.head-meta{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:.8rem;color:#B9C4D0}
+.refresh-btn{border:1px solid #46586E;color:#DCE5EE;padding:6px 12px;border-radius:6px;font-size:.8rem;font-weight:600}
+.refresh-btn:hover{background:#2A394D}
+
+/* seam divider — the stitched line */
+.seam{height:0;border-bottom:2px dashed #B7C4D1;margin:0}
+
+main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
+
+/* ---------- states ---------- */
+.state{padding:60px 20px;text-align:center;color:var(--muted);font-size:.95rem}
+.state strong{display:block;color:var(--ink);font-family:'Archivo',sans-serif;font-size:1.05rem;margin-bottom:8px}
+.state code{background:#E6EAEF;padding:2px 6px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:.85em}
+
+/* ---------- overview ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:26px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.kpi .num{font-family:'Archivo',sans-serif;font-weight:800;font-size:1.9rem;line-height:1.1}
+.kpi .lbl{font-size:.74rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.kpi.flagged .num{color:var(--flag)}
+
+.section-title{font-family:'Archivo',sans-serif;font-weight:700;font-size:.85rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 12px}
+
+.dept-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+/* department card styled as a garment swing-tag: punched hole + stitched top seam */
+.dept-card{position:relative;background:var(--card);border:1px solid var(--line);border-top:3px dashed var(--chambray);border-radius:10px;padding:16px 16px 14px;text-align:left;width:100%;transition:transform .12s ease, box-shadow .12s ease}
+.dept-card::before{content:"";position:absolute;top:10px;right:12px;width:10px;height:10px;border:2px solid var(--line);border-radius:50%;background:var(--paper)}
+.dept-card:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(30,42,58,.10)}
+.dept-name{font-family:'Archivo',sans-serif;font-weight:700;font-size:1.02rem;padding-right:22px}
+.dept-owner{font-size:.76rem;color:var(--muted);margin:2px 0 12px}
+.dept-stats{display:flex;gap:16px;align-items:baseline}
+.dept-stats .big{font-family:'Archivo',sans-serif;font-weight:800;font-size:1.7rem}
+.dept-stats .small{font-size:.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.badge-stale{display:inline-block;margin-top:10px;background:#FBEAE8;color:var(--flag);border:1px solid #E9BDB8;font-size:.72rem;font-weight:700;padding:3px 8px;border-radius:999px}
+.badge-clear{display:inline-block;margin-top:10px;color:var(--closed);font-size:.75rem;font-weight:600}
+
+/* ---------- department view ---------- */
+.back{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:.85rem;color:var(--chambray);margin-bottom:14px}
+.dept-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.dept-head h1{font-family:'Archivo',sans-serif;font-weight:800;font-size:1.5rem}
+.dept-head .owner{color:var(--muted);font-size:.85rem}
+
+.searchbar{display:flex;gap:10px;margin:18px 0 14px;flex-wrap:wrap;align-items:center}
+.searchbar input{flex:1;min-width:220px;padding:11px 14px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:.95rem;background:var(--card)}
+.searchbar input::placeholder{color:#98A2AD}
+.toggle{font-size:.8rem;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px;user-select:none;cursor:pointer}
+.toggle input{accent-color:var(--chambray);width:16px;height:16px;cursor:pointer}
+
+/* ---------- NCR list ---------- */
+.ncr-list{display:flex;flex-direction:column;gap:10px}
+.ncr{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:6px 14px;align-items:start}
+.ncr.stale{border-left:4px solid var(--flag)}
+.ref-chip{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:.82rem;background:var(--tagbg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;white-space:nowrap}
+.ncr-mid{min-width:0}
+.ncr-what{font-size:.9rem;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ncr-meta{margin-top:5px;font-size:.75rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px}
+.ncr-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.pill{font-size:.71rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.pill.open{background:#FBF0E2;color:#9A5A17;border:1px solid #EBCDA5}
+.pill.prog{background:#E8EEF4;color:var(--prog);border:1px solid #C4D2DE}
+.pill.closed{background:#E8F1EA;color:var(--closed);border:1px solid #C0D8C6}
+.pill.stale{background:#FBEAE8;color:var(--flag);border:1px solid #E9BDB8}
+.sev{font-size:.72rem;font-weight:600;color:var(--muted)}
+.sev::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px;background:var(--muted)}
+.sev.Critical::before{background:var(--flag)} .sev.Critical{color:var(--flag)}
+.sev.Major::before{background:var(--open)}
+.sev.Minor::before{background:var(--closed)}
+.sheet-link{font-size:.75rem;font-weight:600;white-space:nowrap}
+.count-line{font-size:.8rem;color:var(--muted);margin:2px 0 12px}
+
+footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color:#98A2AD}
+
+@media (max-width:560px){
+  .ncr{grid-template-columns:1fr}
+  .ncr-side{flex-direction:row;align-items:center;justify-content:flex-start}
+  .head-meta{width:100%;margin-left:0}
+}
+@media (prefers-reduced-motion: reduce){
+  .dept-card{transition:none}
+  .dept-card:hover{transform:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Tibard <span>NCR Dashboard</span></div>
+  <div class="head-meta">
+    <span id="updated"></span>
+    <button class="refresh-btn" id="refreshBtn" type="button">Refresh</button>
+  </div>
+</header>
+<div class="seam"></div>
+
+<main id="app">
+  <div class="state"><strong>Loading the register&hellip;</strong>Fetching live NCRs from the Google Sheet.</div>
+</main>
+
+<footer>Data comes live from the NCR register Google Sheet. To update an NCR (status, root cause, corrective action), open it in the sheet &mdash; completing NCRs here is coming later.</footer>
+
+<script>
+/* ================= CONFIG ================= */
+const API_URL = "https://script.google.com/macros/s/AKfycbyfpl9AnvGr5zv-Vimh04no7LhYD2RV6ZZMlyan2BQhWPHLqKZlbjDB0x0y-Y9qLfw5/exec";
+const STALE_DAYS = 7;                    // flag if still "Open" after this many days
+const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
+const OWNERS = {
+  "Sales":"Duncan", "Suppliers & DPD":"Duncan", "IT & Digital":"Ben",
+  "Production":"Gail", "EMB":"Sharon", "Stores":"Ste",
+  "Accounts":"Vanessa", "ISO/QC":"Luke H", "Other":"Luke H"
+};
+/* Suppliers + DPD reviewed as one, matching the monthly meeting */
+function groupDept(d){ return (d === "Suppliers" || d === "DPD") ? "Suppliers & DPD" : (d || "Other"); }
+/* ========================================== */
+
+let DATA = null;
+let view = { dept: null, search: "", showClosed: false };
+
+const $app = document.getElementById('app');
+const $updated = document.getElementById('updated');
+document.getElementById('refreshBtn').addEventListener('click', () => load(true));
+
+function daysSince(iso){
+  const t = new Date(iso); if (isNaN(t)) return 0;
+  return Math.floor((Date.now() - t.getTime()) / 86400000);
+}
+function isLive(r){ return r.status === "Open" || r.status === "In Progress"; }
+function isStale(r){ return r.status === "Open" && daysSince(r.ts) > STALE_DAYS; }
+function isNew(r){ return daysSince(r.ts) <= NEW_WINDOW_DAYS; }
+function esc(s){ const d = document.createElement('div'); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+function fmtDate(iso){
+  const t = new Date(iso); if (isNaN(t)) return "";
+  return t.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+}
+function sheetLink(row){
+  if (!DATA || !DATA.sheetUrl) return null;
+  return DATA.sheetUrl.replace(/\/edit.*$/, '/edit') + '#gid=' + DATA.gid + '&range=A' + row;
+}
+
+async function load(manual){
+  if (manual) $app.innerHTML = '<div class="state"><strong>Refreshing&hellip;</strong></div>';
+  if (API_URL.indexOf('PASTE_') === 0){
+    $app.innerHTML = '<div class="state"><strong>Not connected yet</strong>Open this file and paste your Apps Script Web App URL into <code>API_URL</code> at the top of the script section.</div>';
+    return;
+  }
+  try {
+    const res = await fetch(API_URL + (API_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    DATA = await res.json();
+    $updated.textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+    render();
+  } catch (err){
+    $app.innerHTML = '<div class="state"><strong>Couldn\'t reach the register</strong>' +
+      'Check you\'re online, then press Refresh. If it keeps failing, the Apps Script deployment may need redeploying.<br><br><code>' + esc(err.message) + '</code></div>';
+  }
+}
+
+function render(){ view.dept ? renderDept() : renderOverview(); }
+
+/* ---------------- overview ---------------- */
+function renderOverview(){
+  const rows = DATA.rows;
+  const live = rows.filter(isLive);
+  const stale = rows.filter(isStale);
+  const fresh = rows.filter(isNew);
+
+  const groups = {};
+  rows.forEach(r => {
+    const g = groupDept(r.dept);
+    (groups[g] = groups[g] || []).push(r);
+  });
+
+  const order = Object.keys(groups).sort((a,b) =>
+    groups[b].filter(isLive).length - groups[a].filter(isLive).length);
+
+  let html =
+    '<div class="kpis">' +
+      kpi(fresh.length, 'New this week') +
+      kpi(live.length, 'Open + in progress') +
+      kpi(stale.length, 'Not actioned in ' + STALE_DAYS + ' days', stale.length > 0) +
+      kpi(rows.filter(r => r.status === 'Closed').length, 'Closed to date') +
+    '</div>' +
+    '<h2 class="section-title">Departments &mdash; tap yours</h2>' +
+    '<div class="dept-grid">';
+
+  order.forEach(g => {
+    const rs = groups[g];
+    const nOpen = rs.filter(isLive).length;
+    const nNew = rs.filter(isNew).length;
+    const nStale = rs.filter(isStale).length;
+    html +=
+      '<button class="dept-card" type="button" data-dept="' + esc(g) + '">' +
+        '<div class="dept-name">' + esc(g) + '</div>' +
+        '<div class="dept-owner">' + esc(OWNERS[g] || '') + '</div>' +
+        '<div class="dept-stats">' +
+          '<span><span class="big">' + nNew + '</span> <span class="small">new</span></span>' +
+          '<span><span class="big">' + nOpen + '</span> <span class="small">open</span></span>' +
+        '</div>' +
+        (nStale > 0
+          ? '<span class="badge-stale">' + nStale + ' not actioned in ' + STALE_DAYS + '+ days</span>'
+          : '<span class="badge-clear">All actioned &#10003;</span>') +
+      '</button>';
+  });
+
+  html += '</div>';
+  $app.innerHTML = html;
+  $app.querySelectorAll('.dept-card').forEach(b =>
+    b.addEventListener('click', () => { view = { dept: b.dataset.dept, search: "", showClosed: false }; render(); window.scrollTo(0,0); }));
+}
+
+function kpi(n, label, flagged){
+  return '<div class="kpi' + (flagged ? ' flagged' : '') + '"><div class="num">' + n + '</div><div class="lbl">' + label + '</div></div>';
+}
+
+/* ---------------- department view ---------------- */
+function renderDept(){
+  const g = view.dept;
+  const rs = DATA.rows.filter(r => groupDept(r.dept) === g);
+  const live = rs.filter(isLive);
+  const stale = rs.filter(isStale);
+  const openOnly = rs.filter(r => r.status === 'Open');
+  const prog = rs.filter(r => r.status === 'In Progress');
+
+  let html =
+    '<button class="back" type="button" id="backBtn">&larr; All departments</button>' +
+    '<div class="dept-head"><h1>' + esc(g) + '</h1><span class="owner">Owner: ' + esc(OWNERS[g] || '&mdash;') + '</span></div>' +
+    '<div class="kpis">' +
+      kpi(openOnly.length, 'Open') +
+      kpi(prog.length, 'In progress') +
+      kpi(stale.length, 'Not actioned in ' + STALE_DAYS + ' days', stale.length > 0) +
+      kpi(rs.filter(r => r.status === 'Closed').length, 'Closed') +
+    '</div>' +
+    '<div class="searchbar">' +
+      '<input type="search" id="q" placeholder="Search by NCR number, order, customer or keyword&hellip;" value="' + esc(view.search) + '" autocomplete="off">' +
+      '<label class="toggle"><input type="checkbox" id="showClosed"' + (view.showClosed ? ' checked' : '') + '> Show closed</label>' +
+    '</div>' +
+    '<div id="listWrap"></div>';
+
+  $app.innerHTML = html;
+  document.getElementById('backBtn').addEventListener('click', () => { view.dept = null; render(); });
+  const q = document.getElementById('q');
+  q.addEventListener('input', () => { view.search = q.value; renderList(rs); });
+  document.getElementById('showClosed').addEventListener('change', e => { view.showClosed = e.target.checked; renderList(rs); });
+  renderList(rs);
+}
+
+function renderList(rs){
+  const term = view.search.trim().toLowerCase();
+  let list = view.showClosed ? rs.slice() : rs.filter(isLive);
+
+  if (term){
+    list = list.filter(r =>
+      (r.ref || '').toLowerCase().includes(term) ||
+      (r.order || '').toLowerCase().includes(term) ||
+      (r.cust || '').toLowerCase().includes(term) ||
+      (r.what || '').toLowerCase().includes(term));
+    /* refs that start with the term float to the top */
+    list.sort((a,b) => {
+      const as = (a.ref||'').toLowerCase().includes(term) ? 0 : 1;
+      const bs = (b.ref||'').toLowerCase().includes(term) ? 0 : 1;
+      return as - bs || (a.ref < b.ref ? 1 : -1);
+    });
+  } else {
+    /* stale first, then open, then in progress, newest first within each */
+    const rank = r => isStale(r) ? 0 : r.status === 'Open' ? 1 : r.status === 'In Progress' ? 2 : 3;
+    list.sort((a,b) => rank(a) - rank(b) || (a.ts < b.ts ? 1 : -1));
+  }
+
+  const wrap = document.getElementById('listWrap');
+  if (!list.length){
+    wrap.innerHTML = '<div class="state"><strong>' + (term ? 'No NCRs match "' + esc(view.search) + '"' : 'Nothing outstanding') + '</strong>' +
+      (term ? 'Try just the number, e.g. <code>176</code>.' : 'No open NCRs in this department. Tick "Show closed" to see history.') + '</div>';
+    return;
+  }
+
+  wrap.innerHTML =
+    '<p class="count-line">' + list.length + ' NCR' + (list.length === 1 ? '' : 's') + (view.showClosed ? ' (incl. closed)' : ' outstanding') + '</p>' +
+    '<div class="ncr-list">' + list.map(card).join('') + '</div>';
+}
+
+function card(r){
+  const stale = isStale(r);
+  const age = daysSince(r.ts);
+  const pill = r.status === 'Closed' ? '<span class="pill closed">Closed</span>'
+             : r.status === 'In Progress' ? '<span class="pill prog">In progress</span>'
+             : '<span class="pill open">Open</span>';
+  const link = sheetLink(r.row);
+  return '<div class="ncr' + (stale ? ' stale' : '') + '">' +
+    '<span class="ref-chip">' + esc(r.ref || '&mdash;') + '</span>' +
+    '<div class="ncr-mid">' +
+      '<div class="ncr-what">' + esc(r.what) + '</div>' +
+      '<div class="ncr-meta">' +
+        '<span>' + fmtDate(r.ts) + ' &middot; ' + age + 'd old</span>' +
+        (r.order ? '<span>Order ' + esc(r.order) + '</span>' : '') +
+        (r.cust ? '<span>' + esc(r.cust) + '</span>' : '') +
+        (r.sev ? '<span class="sev ' + esc(r.sev) + '">' + esc(r.sev) + '</span>' : '') +
+      '</div>' +
+    '</div>' +
+    '<div class="ncr-side">' +
+      (stale ? '<span class="pill stale">' + age + 'd &middot; not actioned</span>' : pill) +
+      (link ? '<a class="sheet-link" href="' + link + '" target="_blank" rel="noopener">Complete in sheet &rarr;</a>' : '') +
+    '</div>' +
+  '</div>';
+}
+
+load();
+setInterval(() => { if (DATA) load(); }, 5 * 60 * 1000);  // auto-refresh every 5 min
+</script>
+</body>
+</html>
