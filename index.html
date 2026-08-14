@@ -104,6 +104,32 @@ main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
 
 footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color:#98A2AD}
 
+
+/* ---------- detail / complete panel ---------- */
+.overlay{position:fixed;inset:0;background:rgba(30,42,58,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;z-index:50;overflow-y:auto}
+.panel{background:var(--card);border-radius:12px;max-width:640px;width:100%;padding:20px 22px;box-shadow:0 18px 50px rgba(30,42,58,.3)}
+.panel-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.panel-top .ref-chip{font-size:.95rem}
+.panel-close{margin-left:auto;font-size:1.5rem;line-height:1;color:var(--muted);padding:4px 8px}
+.panel-what{font-size:.95rem;line-height:1.5;margin:6px 0 4px}
+.panel-meta{font-size:.78rem;color:var(--muted);margin-bottom:14px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field.wide{grid-column:1 / -1}
+.field label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.field input,.field select,.field textarea{font:inherit;font-size:.9rem;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:#FBFCFD;width:100%}
+.field textarea{resize:vertical;min-height:64px}
+.panel-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;align-items:center}
+.btn{font-weight:700;font-size:.88rem;padding:10px 18px;border-radius:8px}
+.btn-save{background:var(--ink);color:#fff}
+.btn-save:disabled{opacity:.55;cursor:default}
+.btn-cancel{color:var(--muted)}
+.save-msg{font-size:.8rem;font-weight:600;margin-right:auto}
+.save-msg.ok{color:var(--closed)}
+.save-msg.err{color:var(--flag)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:.85rem;font-weight:600;padding:11px 18px;border-radius:8px;box-shadow:0 8px 24px rgba(30,42,58,.35);z-index:60}
+@media (max-width:560px){ .form-grid{grid-template-columns:1fr} }
+
 @media (max-width:560px){
   .ncr{grid-template-columns:1fr}
   .ncr-side{flex-direction:row;align-items:center;justify-content:flex-start}
@@ -130,11 +156,12 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
   <div class="state"><strong>Loading the register&hellip;</strong>Fetching live NCRs from the Google Sheet.</div>
 </main>
 
-<footer>Data comes live from the NCR register Google Sheet. To update an NCR (status, root cause, corrective action), open it in the sheet &mdash; completing NCRs here is coming later.</footer>
+<footer>Data comes live from the NCR register Google Sheet. Tap any NCR to view details and complete it &mdash; saves go straight back to the register.</footer>
 
 <script>
 /* ================= CONFIG ================= */
 const API_URL = "https://script.google.com/macros/s/AKfycbyfpl9AnvGr5zv-Vimh04no7LhYD2RV6ZZMlyan2BQhWPHLqKZlbjDB0x0y-Y9qLfw5/exec";
+const APP_KEY = "tibard-ncr-2026";   // must match APP_KEY in the Apps Script
 const STALE_DAYS = 7;                    // flag if still "Open" after this many days
 const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
 const OWNERS = {
@@ -309,6 +336,7 @@ function renderList(rs){
   wrap.innerHTML =
     '<p class="count-line">' + list.length + ' NCR' + (list.length === 1 ? '' : 's') + (view.showClosed ? ' (incl. closed)' : ' outstanding') + '</p>' +
     '<div class="ncr-list">' + list.map(card).join('') + '</div>';
+  attachCardClicks();
 }
 
 function card(r){
@@ -317,8 +345,7 @@ function card(r){
   const pill = r.status === 'Closed' ? '<span class="pill closed">Closed</span>'
              : r.status === 'In Progress' ? '<span class="pill prog">In progress</span>'
              : '<span class="pill open">Open</span>';
-  const link = sheetLink(r.row);
-  return '<div class="ncr' + (stale ? ' stale' : '') + '">' +
+  return '<button type="button" class="ncr' + (stale ? ' stale' : '') + '" data-ref="' + esc(r.ref) + '" style="text-align:left;width:100%">' +
     '<span class="ref-chip">' + esc(r.ref || '&mdash;') + '</span>' +
     '<div class="ncr-mid">' +
       '<div class="ncr-what">' + esc(r.what) + '</div>' +
@@ -331,9 +358,99 @@ function card(r){
     '</div>' +
     '<div class="ncr-side">' +
       (stale ? '<span class="pill stale">' + age + 'd &middot; not actioned</span>' : pill) +
-      (link ? '<a class="sheet-link" href="' + link + '" target="_blank" rel="noopener">Complete in sheet &rarr;</a>' : '') +
     '</div>' +
-  '</div>';
+  '</button>';
+}
+
+/* ---------------- detail panel + save ---------------- */
+function attachCardClicks(){
+  document.querySelectorAll('.ncr[data-ref]').forEach(el =>
+    el.addEventListener('click', () => {
+      const r = DATA.rows.find(x => x.ref === el.dataset.ref);
+      if (r) openDetail(r);
+    }));
+}
+
+function sel(name, options, current){
+  return '<select id="f_' + name + '">' + ['',...options].map(o =>
+    '<option value="' + esc(o) + '"' + (o === current ? ' selected' : '') + '>' + (o || '&mdash;') + '</option>').join('') + '</select>';
+}
+function txt(name, val){ return '<input type="text" id="f_' + name + '" value="' + esc(val || '') + '">'; }
+function area(name, val){ return '<textarea id="f_' + name + '">' + esc(val || '') + '</textarea>'; }
+
+function openDetail(r){
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  const targetVal = r.target && !isNaN(new Date(r.target)) ? new Date(r.target).toISOString().slice(0,10) : '';
+  ov.innerHTML =
+    '<div class="panel" role="dialog" aria-modal="true" aria-label="' + esc(r.ref) + '">' +
+      '<div class="panel-top"><span class="ref-chip">' + esc(r.ref) + '</span>' +
+        '<span class="sev ' + esc(r.sev) + '">' + esc(r.sev || '') + '</span>' +
+        '<button class="panel-close" type="button" aria-label="Close">&times;</button></div>' +
+      '<div class="panel-what">' + esc(r.what) + '</div>' +
+      '<div class="panel-meta">' +
+        '<span>Raised ' + fmtDate(r.ts) + ' &middot; ' + daysSince(r.ts) + 'd old</span>' +
+        (r.order ? '<span>Order ' + esc(r.order) + '</span>' : '') +
+        (r.cust ? '<span>' + esc(r.cust) + '</span>' : '') +
+        (r.cat ? '<span>' + esc(r.cat) + '</span>' : '') +
+        (sheetLink(r.row) ? '<a href="' + sheetLink(r.row) + '" target="_blank" rel="noopener">Open in sheet &rarr;</a>' : '') +
+      '</div>' +
+      '<div class="form-grid">' +
+        '<div class="field"><label>Status</label>' + sel('status', ['Open','In Progress','Closed'], r.status) + '</div>' +
+        '<div class="field"><label>Severity</label>' + sel('sev', ['Critical','Major','Minor'], r.sev) + '</div>' +
+        '<div class="field"><label>Owner</label>' + txt('owner', r.owner) + '</div>' +
+        '<div class="field"><label>Action owner</label>' + txt('actionOwner', '') + '</div>' +
+        '<div class="field wide"><label>Root cause</label>' + area('root', '') + '</div>' +
+        '<div class="field wide"><label>Containment action</label>' + area('contain', '') + '</div>' +
+        '<div class="field wide"><label>Corrective action</label>' + area('corrective', '') + '</div>' +
+        '<div class="field"><label>Disposition</label>' + txt('disp', '') + '</div>' +
+        '<div class="field"><label>Target complete date</label><input type="date" id="f_target" value="' + targetVal + '"></div>' +
+        '<div class="field"><label>Verified by</label>' + txt('verified', '') + '</div>' +
+        '<div class="field wide"><label>Resolution notes</label>' + area('notes', '') + '</div>' +
+      '</div>' +
+      '<div class="panel-actions">' +
+        '<span class="save-msg" id="saveMsg"></span>' +
+        '<button class="btn btn-cancel" type="button">Cancel</button>' +
+        '<button class="btn btn-save" type="button" id="saveBtn">Save to register</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  ov.querySelector('.panel-close').addEventListener('click', close);
+  ov.querySelector('.btn-cancel').addEventListener('click', close);
+  document.addEventListener('keydown', function esc_(e){ if (e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc_); } });
+
+  ov.querySelector('#saveBtn').addEventListener('click', async () => {
+    const btn = ov.querySelector('#saveBtn');
+    const msg = ov.querySelector('#saveMsg');
+    const val = id => { const el = ov.querySelector('#f_' + id); return el ? el.value.trim() : ''; };
+    const updates = {};
+    ['status','sev','owner','actionOwner','root','contain','corrective','disp','target','verified','notes']
+      .forEach(k => { const v = val(k); if (v !== '') updates[k] = v; });
+    if (val('status')) updates.status = val('status');   // status always included if chosen
+
+    btn.disabled = true; msg.textContent = 'Saving\u2026'; msg.className = 'save-msg';
+    try {
+      const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, updates }) });
+      const out = await res.json();
+      if (!out.ok) throw new Error(out.error || 'Save failed');
+      close();
+      toast(r.ref + ' saved to the register');
+      load();
+    } catch (err) {
+      btn.disabled = false;
+      msg.textContent = 'Couldn\u2019t save: ' + err.message;
+      msg.className = 'save-msg err';
+    }
+  });
+}
+
+function toast(text){
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = text;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
 }
 
 load();
