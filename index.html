@@ -106,6 +106,12 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 
 
 /* ---------- detail / complete panel ---------- */
+.detail-rows{background:var(--tagbg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:10px 0 16px;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:.85rem}
+.detail-rows dt{font-weight:700;color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;padding-top:2px;white-space:nowrap}
+.detail-rows dd{margin:0;line-height:1.4}
+.field.invalid input,.field.invalid select,.field.invalid textarea{border-color:var(--flag);background:#FDF3F2}
+.field.invalid label{color:var(--flag)}
+.req-note{font-size:.75rem;color:var(--muted);margin:2px 0 10px}
 .overlay{position:fixed;inset:0;background:rgba(30,42,58,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;z-index:50;overflow-y:auto}
 .panel{background:var(--card);border-radius:12px;max-width:640px;width:100%;padding:20px 22px;box-shadow:0 18px 50px rgba(30,42,58,.3)}
 .panel-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
@@ -390,23 +396,26 @@ function openDetail(r){
       '<div class="panel-what">' + esc(r.what) + '</div>' +
       '<div class="panel-meta">' +
         '<span>Raised ' + fmtDate(r.ts) + ' &middot; ' + daysSince(r.ts) + 'd old</span>' +
-        (r.order ? '<span>Order ' + esc(r.order) + '</span>' : '') +
-        (r.cust ? '<span>' + esc(r.cust) + '</span>' : '') +
-        (r.cat ? '<span>' + esc(r.cat) + '</span>' : '') +
         (sheetLink(r.row) ? '<a href="' + sheetLink(r.row) + '" target="_blank" rel="noopener">Open in sheet &rarr;</a>' : '') +
       '</div>' +
+      '<dl class="detail-rows">' +
+        (r.cat ? '<dt>Issue category</dt><dd>' + esc(r.cat) + '</dd>' : '') +
+        (r.cust ? '<dt>Customer / Supplier</dt><dd>' + esc(r.cust) + '</dd>' : '') +
+        (r.order ? '<dt>Order number</dt><dd>' + esc(r.order) + '</dd>' : '') +
+        (r.suspected ? '<dt>Suspected cause</dt><dd>' + esc(r.suspected) + '</dd>' : '') +
+        (r.immediate ? '<dt>Immediate action taken</dt><dd>' + esc(r.immediate) + '</dd>' : '') +
+      '</dl>' +
+      '<p class="req-note">Moving to In Progress needs a Severity. Closing needs every field below filled in.</p>' +
       '<div class="form-grid">' +
         '<div class="field"><label>Status</label>' + sel('status', ['Open','In Progress','Closed'], r.status) + '</div>' +
-        '<div class="field"><label>Severity</label>' + sel('sev', ['Critical','Major','Minor'], r.sev) + '</div>' +
-        '<div class="field"><label>Owner</label>' + txt('owner', r.owner) + '</div>' +
-        '<div class="field"><label>Action owner</label>' + txt('actionOwner', '') + '</div>' +
-        '<div class="field wide"><label>Root cause</label>' + area('root', '') + '</div>' +
-        '<div class="field wide"><label>Containment action</label>' + area('contain', '') + '</div>' +
-        '<div class="field wide"><label>Corrective action</label>' + area('corrective', '') + '</div>' +
-        '<div class="field"><label>Disposition</label>' + txt('disp', '') + '</div>' +
-        '<div class="field"><label>Target complete date</label><input type="date" id="f_target" value="' + targetVal + '"></div>' +
-        '<div class="field"><label>Verified by</label>' + txt('verified', '') + '</div>' +
-        '<div class="field wide"><label>Resolution notes</label>' + area('notes', '') + '</div>' +
+        '<div class="field" data-req><label>Severity</label>' + sel('sev', ['Critical','Major','Minor'], r.sev) + '</div>' +
+        '<div class="field" data-req><label>Owner</label>' + txt('owner', r.owner) + '</div>' +
+        '<div class="field" data-req><label>Target complete date</label><input type="date" id="f_target" value="' + targetVal + '"></div>' +
+        '<div class="field wide" data-req><label>Root cause</label>' + area('root', r.root) + '</div>' +
+        '<div class="field wide" data-req><label>Containment action</label>' + area('contain', r.contain) + '</div>' +
+        '<div class="field wide" data-req><label>Corrective action</label>' + area('corrective', r.corrective) + '</div>' +
+        '<div class="field" data-req><label>Verified by</label>' + txt('verified', r.verified) + '</div>' +
+        '<div class="field wide" data-req><label>Resolution notes</label>' + area('notes', r.notes) + '</div>' +
       '</div>' +
       '<div class="panel-actions">' +
         '<span class="save-msg" id="saveMsg"></span>' +
@@ -425,10 +434,28 @@ function openDetail(r){
     const btn = ov.querySelector('#saveBtn');
     const msg = ov.querySelector('#saveMsg');
     const val = id => { const el = ov.querySelector('#f_' + id); return el ? el.value.trim() : ''; };
+
+    // ---- Mandatory checks: In Progress needs Severity; Closed needs everything ----
+    ov.querySelectorAll('.field.invalid').forEach(f => f.classList.remove('invalid'));
+    const chosen = val('status');
+    let needed = [];
+    if (chosen === 'In Progress') needed = ['sev'];
+    if (chosen === 'Closed') needed = ['sev','owner','target','root','contain','corrective','verified','notes'];
+    const missing = needed.filter(k => val(k) === '');
+    if (missing.length){
+      missing.forEach(k => { const el = ov.querySelector('#f_' + k); if (el) el.closest('.field').classList.add('invalid'); });
+      msg.textContent = chosen === 'Closed'
+        ? 'Fill in the highlighted fields to close this NCR'
+        : 'Set a Severity before moving to In Progress';
+      msg.className = 'save-msg err';
+      const first = ov.querySelector('.field.invalid input, .field.invalid select, .field.invalid textarea');
+      if (first) first.focus();
+      return;
+    }
+
     const updates = {};
-    ['status','sev','owner','actionOwner','root','contain','corrective','disp','target','verified','notes']
+    ['status','sev','owner','root','contain','corrective','target','verified','notes']
       .forEach(k => { const v = val(k); if (v !== '') updates[k] = v; });
-    if (val('status')) updates.status = val('status');   // status always included if chosen
 
     btn.disabled = true; msg.textContent = 'Saving\u2026'; msg.className = 'save-msg';
     try {
