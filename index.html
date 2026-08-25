@@ -319,8 +319,8 @@ function renderMainBody(){
     (groups[g] = groups[g] || []).push(r);
   });
 
-  const order = Object.keys(groups).sort((a,b) =>
-    groups[b].filter(isLive).length - groups[a].filter(isLive).length);
+  /* alphabetical, so people can find their own department at a glance */
+  const order = Object.keys(groups).sort((a,b) => a.localeCompare(b));
 
   let html =
     '<div class="kpis">' +
