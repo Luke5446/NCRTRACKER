@@ -100,6 +100,9 @@ main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
 .dept-head .owner{color:var(--muted);font-size:.85rem}
 
 .searchbar{display:flex;gap:10px;margin:18px 0 14px;flex-wrap:wrap;align-items:center}
+.main-search{margin:0 0 16px}
+.main-search input{font-size:1rem;padding:13px 16px}
+.dept-tag{background:var(--tagbg);border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-weight:600;color:var(--ink)}
 .searchbar input{flex:1;min-width:220px;padding:11px 14px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:.95rem;background:var(--card)}
 .searchbar input::placeholder{color:#98A2AD}
 .toggle{font-size:.8rem;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px;user-select:none;cursor:pointer}
@@ -220,14 +223,18 @@ const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
 const OWNERS = {
   "Sales":"Duncan", "Suppliers & DPD":"Duncan", "IT & Digital":"Ben",
   "Production":"Gail", "EMB":"Sharon", "Stores":"Ste",
-  "Accounts":"Vanessa", "ISO/QC":"Yvonne", "Other":"Luke H"
+  "Accounts":"Vanessa", "ISO/QC":"Yvonne", "Procurement":"Duncan", "Other":"Luke H"
 };
 /* Suppliers + DPD reviewed as one, matching the monthly meeting */
 function groupDept(d){ return (d === "Suppliers" || d === "DPD") ? "Suppliers & DPD" : (d || "Other"); }
+/* Staff read "Open" as "someone is on it", so the app says Outstanding.
+   The value written to the register is still "Open" — this is wording only. */
+const STATUS_LABEL = { "Open": "Outstanding" };
+function statusLabel(v){ return STATUS_LABEL[v] || v; }
 /* ========================================== */
 
 let DATA = null;
-let view = { dept: null, search: "", showClosed: false, metric: null };
+let view = { dept: null, search: "", showClosed: false, metric: null, q: "" };
 
 const $app = document.getElementById('app');
 const $updated = document.getElementById('updated');
@@ -285,6 +292,24 @@ function metrics(){
 }
 
 function renderOverview(){
+  $app.innerHTML =
+    '<div class="searchbar main-search">' +
+      '<input type="search" id="mainQ" autocomplete="off" value="' + esc(view.q) + '" ' +
+        'placeholder="Search every NCR &mdash; number, order, customer or keyword&hellip;">' +
+    '</div>' +
+    '<div id="mainBody"></div>';
+
+  const box = document.getElementById('mainQ');
+  box.addEventListener('input', () => { view.q = box.value; renderMainBody(); });
+  renderMainBody();
+}
+
+/* Either the search results, or the tiles and departments. */
+function renderMainBody(){
+  const wrap = document.getElementById('mainBody');
+  if (!wrap) return;
+  if (view.q.trim()){ renderSearch(wrap, view.q.trim()); return; }
+
   const rows = DATA.rows;
   const M = metrics();
 
@@ -322,7 +347,7 @@ function renderOverview(){
         '<div class="dept-owner">' + esc(OWNERS[g] || '') + '</div>' +
         '<div class="dept-stats">' +
           '<span><span class="big">' + nNew + '</span> <span class="small">new</span></span>' +
-          '<span><span class="big">' + nOpen + '</span> <span class="small">open</span></span>' +
+          '<span><span class="big">' + nOpen + '</span> <span class="small">outstanding</span></span>' +
         '</div>' +
         (nStale > 0
           ? '<span class="badge-stale">' + nStale + ' not actioned in ' + STALE_DAYS + '+ days</span>'
@@ -331,15 +356,41 @@ function renderOverview(){
   });
 
   html += '</div>';
-  $app.innerHTML = html;
-  $app.querySelectorAll('.dept-card').forEach(b =>
-    b.addEventListener('click', () => { view = { dept: b.dataset.dept, search: "", showClosed: false, metric: null }; render(); window.scrollTo(0,0); }));
-  $app.querySelectorAll('.kpi-btn').forEach(b =>
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.dept-card').forEach(b =>
+    b.addEventListener('click', () => { view = { dept: b.dataset.dept, search: "", showClosed: false, metric: null, q: "" }; render(); window.scrollTo(0,0); }));
+  wrap.querySelectorAll('.kpi-btn').forEach(b =>
     b.addEventListener('click', () => {
       view.metric = (view.metric === b.dataset.metric) ? null : b.dataset.metric;
-      renderOverview();
+      renderMainBody();
     }));
   renderBreakdown();
+}
+
+/* Front-page search: every NCR in the register, closed ones included, so a
+   number can be looked up without knowing whose department it belongs to. */
+function renderSearch(wrap, term){
+  const t = term.toLowerCase();
+  const hit = v => String(v || '').toLowerCase().includes(t);
+  const list = DATA.rows.filter(r => hit(r.ref) || hit(r.order) || hit(r.cust) || hit(r.dept) || hit(r.what));
+
+  /* a matching NCR number is almost always what was wanted, so float those up */
+  list.sort((a,b) => {
+    const rank = r => hit(r.ref) ? 0 : 1;
+    return rank(a) - rank(b) || (a.ts < b.ts ? 1 : -1);
+  });
+
+  if (!list.length){
+    wrap.innerHTML = '<div class="state"><strong>No NCRs match &ldquo;' + esc(term) + '&rdquo;</strong>' +
+      'Try just the number, e.g. <code>176</code>, or an order number.</div>';
+    return;
+  }
+
+  wrap.innerHTML =
+    '<p class="count-line">' + list.length + ' NCR' + (list.length === 1 ? '' : 's') +
+      ' found &mdash; all departments, including closed</p>' +
+    '<div class="ncr-list">' + list.map(r => card(r, true)).join('') + '</div>';
+  attachCardClicks();
 }
 
 /* The department split behind whichever tile is open. */
@@ -381,7 +432,7 @@ function renderDept(){
     '<button class="back" type="button" id="backBtn">&larr; All departments</button>' +
     '<div class="dept-head"><h1>' + esc(g) + '</h1><span class="owner">Owner: ' + esc(OWNERS[g] || '&mdash;') + '</span></div>' +
     '<div class="kpis">' +
-      kpi(openOnly.length, 'Open') +
+      kpi(openOnly.length, 'Outstanding') +
       kpi(prog.length, 'In progress') +
       kpi(stale.length, 'Not actioned in ' + STALE_DAYS + ' days', true) +
     '</div>' +
@@ -424,7 +475,7 @@ function renderList(rs){
   const wrap = document.getElementById('listWrap');
   if (!list.length){
     wrap.innerHTML = '<div class="state"><strong>' + (term ? 'No NCRs match "' + esc(view.search) + '"' : 'Nothing outstanding') + '</strong>' +
-      (term ? 'Try just the number, e.g. <code>176</code>.' : 'No open NCRs in this department. Tick "Show closed" to see history.') + '</div>';
+      (term ? 'Try just the number, e.g. <code>176</code>.' : 'No outstanding NCRs in this department. Tick "Show closed" to see history.') + '</div>';
     return;
   }
 
@@ -434,19 +485,20 @@ function renderList(rs){
   attachCardClicks();
 }
 
-function card(r){
+function card(r, withDept){
   const stale = isStale(r);
   const age = daysSince(r.ts);
   const nPics = photosOf(r).length;
   const pill = r.status === 'Closed' ? '<span class="pill closed">Closed</span>'
              : r.status === 'In Progress' ? '<span class="pill prog">In progress</span>'
-             : '<span class="pill open">Open</span>';
+             : '<span class="pill open">Outstanding</span>';
   return '<button type="button" class="ncr' + (stale ? ' stale' : '') + '" data-ref="' + esc(r.ref) + '" style="text-align:left;width:100%">' +
     '<span class="ref-chip">' + esc(r.ref || '&mdash;') + '</span>' +
     '<div class="ncr-mid">' +
       '<div class="ncr-what">' + esc(r.what) + '</div>' +
       '<div class="ncr-meta">' +
         '<span>' + fmtDate(r.ts) + ' &middot; ' + age + 'd old</span>' +
+        (withDept && r.dept ? '<span class="dept-tag">' + esc(groupDept(r.dept)) + '</span>' : '') +
         (r.order ? '<span>Order ' + esc(r.order) + '</span>' : '') +
         (r.cust ? '<span>' + esc(r.cust) + '</span>' : '') +
         (r.sev ? '<span class="sev ' + esc(r.sev) + '">' + esc(r.sev) + '</span>' : '') +
@@ -470,7 +522,8 @@ function attachCardClicks(){
 
 function sel(name, options, current){
   return '<select id="f_' + name + '">' + ['',...options].map(o =>
-    '<option value="' + esc(o) + '"' + (o === current ? ' selected' : '') + '>' + (o || '&mdash;') + '</option>').join('') + '</select>';
+    '<option value="' + esc(o) + '"' + (o === current ? ' selected' : '') + '>' +
+    (o ? esc(statusLabel(o)) : '&mdash;') + '</option>').join('') + '</select>';
 }
 function txt(name, val){ return '<input type="text" id="f_' + name + '" value="' + esc(val || '') + '">'; }
 function area(name, val){ return '<textarea id="f_' + name + '">' + esc(val || '') + '</textarea>'; }
