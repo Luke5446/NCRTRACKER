@@ -31,7 +31,8 @@ const COL = {
 };
 // ===========================================================================
 
-const DEPTS = ['Sales', 'Production', 'IT & Digital', 'Stores', 'Accounts', 'Suppliers', 'Procurement', 'EMB', 'DPD', 'ISO/QC', 'Other'];
+const DEPTS = ['Sales', 'Production', 'IT & Digital', 'Stores', 'Accounts', 'Suppliers', 'Procurement',
+               'EMB', 'Logistics', 'DPD', 'H&B', 'ISO/QC', 'Other'];
 const SEVS  = ['Critical', 'Major', 'Minor'];
 const TYPES = ['Non Conformance', 'Customer Complaint', 'Observation'];
 const CATS  = ['Input error', 'Process error', 'Pricing error', 'Missing item',
@@ -226,6 +227,8 @@ const NCR_OWNERS = {
   'Stores':       'Ste',
   'Accounts':     'Vanessa',
   'DPD':          'Duncan',
+  'H&B':          'Duncan',
+  'Logistics':    'Duncan',
   'Suppliers':    'Duncan',
   'Procurement':  'Duncan',
   'IT & Digital': 'Ben',

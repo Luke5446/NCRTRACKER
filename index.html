@@ -221,12 +221,17 @@ const APP_KEY = "tibard-ncr-2026";   // must match APP_KEY in the Apps Script
 const STALE_DAYS = 7;                    // flag if still "Open" after this many days
 const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
 const OWNERS = {
-  "Sales":"Duncan", "Suppliers & DPD":"Duncan", "IT & Digital":"Ben",
+  "Sales":"Duncan", "Suppliers":"Duncan", "Logistics":"Duncan", "IT & Digital":"Ben",
   "Production":"Gail", "EMB":"Sharon", "Stores":"Ste",
   "Accounts":"Vanessa", "ISO/QC":"Yvonne", "Procurement":"Duncan", "Other":"Luke H"
 };
-/* Suppliers + DPD reviewed as one, matching the monthly meeting */
-function groupDept(d){ return (d === "Suppliers" || d === "DPD") ? "Suppliers & DPD" : (d || "Other"); }
+/* Carriers are reviewed together as Logistics. The register still records which
+   one it was in column C — this only groups them for the managers' view. */
+const LOGISTICS = ["DPD", "H&B", "Logistics"];
+function groupDept(d){
+  const t = String(d || '').trim();
+  return LOGISTICS.indexOf(t) > -1 ? "Logistics" : (t || "Other");
+}
 /* Staff read "Open" as "someone is on it", so the app says Outstanding.
    The value written to the register is still "Open" — this is wording only. */
 const STATUS_LABEL = { "Open": "Outstanding" };
@@ -319,8 +324,8 @@ function renderMainBody(){
     (groups[g] = groups[g] || []).push(r);
   });
 
-  const order = Object.keys(groups).sort((a,b) =>
-    groups[b].filter(isLive).length - groups[a].filter(isLive).length);
+  /* alphabetical, so people can find their own department at a glance */
+  const order = Object.keys(groups).sort((a,b) => a.localeCompare(b));
 
   let html =
     '<div class="kpis">' +
