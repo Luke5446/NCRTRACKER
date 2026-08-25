@@ -301,7 +301,8 @@ function doGet(e) {
 
   function col(name) { return headers.indexOf(name); }
   const c = {
-    ts: col('Timestamp'), dept: col('Department'), type: col('NCR Type'),
+    ts: col('Timestamp'), email: col('Email address'),
+    dept: col('Department'), type: col('NCR Type'),
     cat: col('Issue category'), what: col('What happened?'),
     suspected: col('Suspected cause?'),
     immediate: col('Any immediate action already taken'),
@@ -324,6 +325,7 @@ function doGet(e) {
       row: headerRow + 1 + i,                                   // sheet row for deep links
       ref: String(r[c.ref] || ''),
       ts: r[c.ts] instanceof Date ? r[c.ts].toISOString() : String(r[c.ts]),
+      email: String(r[c.email] || '').trim(),                   // who raised it, column B
       dept: String(r[c.dept] || ''),
       type: String(r[c.type] || ''),
       cat: String(r[c.cat] || ''),

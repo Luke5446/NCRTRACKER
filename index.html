@@ -163,6 +163,7 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .panel-close{margin-left:auto;font-size:1.5rem;line-height:1;color:var(--muted);padding:4px 8px}
 .panel-what{font-size:.95rem;line-height:1.5;margin:6px 0 4px;white-space:pre-line;font-weight:700}
 .panel-meta{font-size:.78rem;color:var(--muted);margin-bottom:14px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.raised-by{font-weight:600;word-break:break-all}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .field{display:flex;flex-direction:column;gap:4px}
 .field.wide{grid-column:1 / -1}
@@ -545,6 +546,8 @@ function openDetail(r){
       '<div class="panel-what">' + esc(r.what) + '</div>' +
       '<div class="panel-meta">' +
         '<span>Raised ' + fmtDate(r.ts) + ' &middot; ' + daysSince(r.ts) + 'd old</span>' +
+        (r.email ? '<a class="raised-by" href="mailto:' + r.email.replace(/[^\w.@+-]/g, '') + '">' +
+          esc(r.email) + '</a>' : '') +
       '</div>' +
       '<dl class="detail-rows">' +
         (r.cat ? '<dt>Issue category</dt><dd>' + esc(r.cat) + '</dd>' : '') +
