@@ -421,7 +421,7 @@ function doPost(e) {
             contain: 'Containment Action', corrective: 'Corrective Action',
             target: 'Target Complete Date', verified: 'Verified by',
             notes: 'Resolution notes' }
-        : { sev: 'Severity' };
+        : { sev: 'Severity', target: 'Target Complete Date' };
       const missing = [];
       Object.keys(need).forEach(function(k){
         const colIdx = headers.indexOf(need[k]) + 1;
