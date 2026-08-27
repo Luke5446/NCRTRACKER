@@ -318,7 +318,6 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 const API_URL = "https://script.google.com/macros/s/AKfycbyfpl9AnvGr5zv-Vimh04no7LhYD2RV6ZZMlyan2BQhWPHLqKZlbjDB0x0y-Y9qLfw5/exec";
 const APP_KEY = "tibard-ncr-2026";   // must match APP_KEY in the Apps Script
 const STALE_DAYS = 7;                    // flag if still "Open" after this many days
-const DEPT_STALE_DAYS = 3;               // the tighter mark a department is held to
 const REPORT_CONTACT = "NCR@tibard.co.uk";   // shown on reports that go outside the company
 const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
 /* A department can be owned by more than one person — list them in an array. */
@@ -361,8 +360,7 @@ function daysSince(iso){
   return Math.floor((Date.now() - t.getTime()) / 86400000);
 }
 function isLive(r){ return r.status === "Open" || r.status === "In Progress"; }
-function notActioned(r, days){ return r.status === "Open" && daysSince(r.ts) > days; }
-function isStale(r){ return notActioned(r, STALE_DAYS); }
+function isStale(r){ return r.status === "Open" && daysSince(r.ts) > STALE_DAYS; }
 function isLate(r){
   if (r.status === 'Closed' || !r.target) return false;
   const t = new Date(r.target);
@@ -593,7 +591,7 @@ function renderDept(){
   const live = rs.filter(isLive);
   const late = rs.filter(isLate);
   const openOnly = rs.filter(r => r.status === 'Open');
-  const slow = rs.filter(r => notActioned(r, DEPT_STALE_DAYS));
+  const slow = rs.filter(isStale);
 
   let html =
     '<button class="back" type="button" id="backBtn">&larr; All departments</button>' +
@@ -601,7 +599,7 @@ function renderDept(){
       (ownerText(g) ? esc(ownerText(g)) : '&mdash;') + '</span></div>' +
     '<div class="kpis">' +
       kpi(openOnly.length, 'Outstanding') +
-      kpi(slow.length, 'Not actioned in ' + DEPT_STALE_DAYS + ' days', true) +
+      kpi(slow.length, 'Not actioned in ' + STALE_DAYS + ' days', true) +
       kpi(late.length, 'Late', true) +
     '</div>' +
     meetingBar(rs, g) +
