@@ -361,6 +361,18 @@ function daysSince(iso){
 }
 function isLive(r){ return r.status === "Open" || r.status === "In Progress"; }
 function isStale(r){ return r.status === "Open" && daysSince(r.ts) > STALE_DAYS; }
+function isLate(r){
+  if (r.status === 'Closed' || !r.target) return false;
+  const t = new Date(r.target);
+  if (isNaN(t)) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return t < today;
+}
+function daysLate(r){
+  const t = new Date(r.target);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.floor((today - t) / 86400000);
+}
 function isNew(r){ return daysSince(r.ts) <= NEW_WINDOW_DAYS; }
 /* offset 0 = this calendar month, -1 = last calendar month */
 function monthStart(offset){ const n = new Date(); return new Date(n.getFullYear(), n.getMonth() + offset, 1); }
@@ -439,8 +451,8 @@ function metrics(){
   return {
     last: { label: 'NCRs in ' + monthName(-1), test: r => inMonth(r, -1) },
     this: { label: 'NCRs in ' + monthName(0),  test: r => inMonth(r, 0) },
-    prog: { label: 'In progress',              test: r => r.status === 'In Progress' },
-    late: { label: 'Not actioned in ' + STALE_DAYS + ' days', test: isStale, flag: true }
+    late: { label: 'Late', title: 'Late (past target date)', test: isLate, flag: true },
+    stale:{ label: 'Not actioned in ' + STALE_DAYS + ' days', test: isStale, flag: true }
   };
 }
 
@@ -558,7 +570,7 @@ function renderBreakdown(){
   matching.forEach(r => { const g = groupDept(r.dept); counts[g] = (counts[g] || 0) + 1; });
   const order = Object.keys(counts).sort((a,b) => counts[b] - counts[a] || (a < b ? -1 : 1));
 
-  wrap.innerHTML = '<div class="breakdown"><h3>' + esc(m.label) + ' &mdash; by department</h3>' +
+  wrap.innerHTML = '<div class="breakdown"><h3>' + esc(m.title || m.label) + ' &mdash; by department</h3>' +
     (order.length
       ? '<table><thead><tr><th>Department</th><th>NCRs</th></tr></thead><tbody>' +
         order.map(g => '<tr><td>' + esc(g) + '</td><td>' + counts[g] + '</td></tr>').join('') +
@@ -577,9 +589,9 @@ function renderDept(){
   const g = view.dept;
   const rs = DATA.rows.filter(r => groupDept(r.dept) === g);
   const live = rs.filter(isLive);
-  const stale = rs.filter(isStale);
+  const late = rs.filter(isLate);
   const openOnly = rs.filter(r => r.status === 'Open');
-  const prog = rs.filter(r => r.status === 'In Progress');
+  const slow = rs.filter(isStale);
 
   let html =
     '<button class="back" type="button" id="backBtn">&larr; All departments</button>' +
@@ -587,8 +599,8 @@ function renderDept(){
       (ownerText(g) ? esc(ownerText(g)) : '&mdash;') + '</span></div>' +
     '<div class="kpis">' +
       kpi(openOnly.length, 'Outstanding') +
-      kpi(prog.length, 'In progress') +
-      kpi(stale.length, 'Not actioned in ' + STALE_DAYS + ' days', true) +
+      kpi(slow.length, 'Not actioned in ' + STALE_DAYS + ' days', true) +
+      kpi(late.length, 'Late', true) +
     '</div>' +
     meetingBar(rs, g) +
     '<div class="searchbar">' +
@@ -694,8 +706,9 @@ function summaryDoc(g, list, monthKey){
   const repeatCust = countBy(list, r => r.cust).filter(x => x[1] > 1);
   const repeatCause = cats.filter(x => x[1] > 1);
   const flags = [];
-  stale.forEach(r => flags.push([r, daysSince(r.ts) + ' days, not actioned']));
-  severe.forEach(r => { if (!isStale(r)) flags.push([r, r.sev + ', still open']); });
+  list.filter(isLate).forEach(r => flags.push([r, daysLate(r) + ' days past target']));
+  stale.forEach(r => { if (!isLate(r)) flags.push([r, daysSince(r.ts) + ' days, not actioned']); });
+  severe.forEach(r => { if (!isStale(r) && !isLate(r)) flags.push([r, r.sev + ', still open']); });
 
   if (!list.length){
     return '<div class="rp">' + reportHead(g, monthKey, 'NCR monthly summary') +
@@ -989,7 +1002,7 @@ function openDetail(r){
         (r.immediate ? '<dt>Immediate action taken</dt><dd>' + esc(r.immediate) + '</dd>' : '') +
       '</dl>' +
       photoSection(r) +
-      '<p class="req-note">Moving to In Progress needs a Severity. Closing needs every field below filled in.</p>' +
+      '<p class="req-note">Moving to In Progress needs a Severity and a target complete date. Closing needs every field below filled in.</p>' +
       '<div class="form-grid">' +
         '<div class="field"><label>Status</label>' + sel('status', ['Open','In Progress','Closed'], r.status) + '</div>' +
         '<div class="field" data-req><label>Severity</label>' + sel('sev', ['Critical','Major','Minor'], r.sev) + '</div>' +
@@ -1071,14 +1084,14 @@ function openDetail(r){
     ov.querySelectorAll('.field.invalid').forEach(f => f.classList.remove('invalid'));
     const chosen = val('status');
     let needed = [];
-    if (chosen === 'In Progress') needed = ['sev'];
+    if (chosen === 'In Progress') needed = ['sev', 'target'];
     if (chosen === 'Closed') needed = ['sev','owner','target','root','contain','corrective','verified','notes'];
     const missing = needed.filter(k => val(k) === '');
     if (missing.length){
       missing.forEach(k => { const el = ov.querySelector('#f_' + k); if (el) el.closest('.field').classList.add('invalid'); });
       msg.textContent = chosen === 'Closed'
         ? 'Fill in the highlighted fields to close this NCR'
-        : 'Set a Severity before moving to In Progress';
+        : 'Set a Severity and a target complete date before moving to In Progress';
       msg.className = 'save-msg err';
       const first = ov.querySelector('.field.invalid input, .field.invalid select, .field.invalid textarea');
       if (first) first.focus();
