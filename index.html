@@ -178,6 +178,9 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .save-msg{font-size:.8rem;font-weight:600;margin-right:auto}
 .save-msg.ok{color:var(--closed)}
 .save-msg.err{color:var(--flag)}
+.draft-note{background:#FBF0E2;border:1px solid #EBCDA5;border-radius:7px;padding:9px 12px;
+  margin-top:14px;font-size:.82rem;color:#7A4A12;line-height:1.5}
+.draft-note button{font-size:.82rem;font-weight:700;color:#7A4A12;text-decoration:underline}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:.85rem;font-weight:600;padding:11px 18px;border-radius:8px;box-shadow:0 8px 24px rgba(30,42,58,.35);z-index:60}
 @media (max-width:560px){ .form-grid{grid-template-columns:1fr} }
 
@@ -386,6 +389,11 @@ function fmtDate(iso){
   const t = new Date(iso); if (isNaN(t)) return "";
   return t.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
 }
+function fetchRegister(){
+  return fetch(API_URL + (API_URL.includes('?') ? '&' : '?') + 't' + '=' + Date.now())
+    .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); });
+}
+
 async function load(manual){
   if (manual) $app.innerHTML = '<div class="state"><strong>Refreshing&hellip;</strong></div>';
   if (API_URL.indexOf('PASTE_') === 0){
@@ -393,15 +401,34 @@ async function load(manual){
     return;
   }
   try {
-    const res = await fetch(API_URL + (API_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    DATA = await res.json();
+    DATA = await fetchRegister();
     $updated.textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     render();
   } catch (err){
+    /* A blip on the five-minute refresh must not take the page away from
+       somebody mid-sentence. Only wipe the screen if there is nothing to keep. */
+    if (DATA && !manual){
+      $updated.textContent = 'Couldn\u2019t refresh \u2014 showing the last copy';
+      return;
+    }
     $app.innerHTML = '<div class="state"><strong>Couldn\'t reach the register</strong>' +
       'Check you\'re online, then press Refresh. If it keeps failing, the Apps Script deployment may need redeploying.<br><br><code>' + esc(err.message) + '</code></div>';
   }
+}
+
+/* One quiet retry before the five-minute refresh gives up, since most of these
+   are a moment's blip rather than anything being wrong. */
+async function backgroundRefresh(){
+  if (!DATA) return;
+  if (document.querySelector('.overlay')) return;   /* somebody is mid-edit — leave them alone */
+  try {
+    DATA = await fetchRegister();
+  } catch (err){
+    try { DATA = await fetchRegister(); }
+    catch (err2){ $updated.textContent = 'Couldn\u2019t refresh \u2014 showing the last copy'; return; }
+  }
+  $updated.textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  render();
 }
 
 function render(){ view.dept ? renderDept() : renderOverview(); }
@@ -896,6 +923,32 @@ function card(r, withDept){
   '</button>';
 }
 
+/* ---------------- unsaved notes ----------------
+   Everything typed into the panel is kept in this browser as it is typed, so a
+   dropped connection, a locked phone or a mis-tap cannot take it away. It is
+   cleared the moment the NCR saves to the register. */
+const FIELD_IDS = ['status','sev','owner','target','root','contain','corrective','verified','notes'];
+
+function draftKey(ref){ return 'ncr-draft-' + ref; }
+function readDraft(ref){
+  try { const raw = localStorage.getItem(draftKey(ref)); return raw ? JSON.parse(raw) : null; }
+  catch (err){ return null; }                     /* private window, or storage blocked */
+}
+function writeDraft(ref, fields){
+  try { localStorage.setItem(draftKey(ref), JSON.stringify({ at: Date.now(), fields: fields })); }
+  catch (err){ /* the panel still works, there is just no safety net */ }
+}
+function clearDraft(ref){ try { localStorage.removeItem(draftKey(ref)); } catch (err){} }
+
+function panelValues(ov){
+  const out = {};
+  FIELD_IDS.forEach(k => { const el = ov.querySelector('#f_' + k); if (el) out[k] = el.value; });
+  return out;
+}
+function applyValues(ov, fields){
+  FIELD_IDS.forEach(k => { const el = ov.querySelector('#f_' + k); if (el && k in fields) el.value = fields[k]; });
+}
+
 /* ---------------- detail panel + save ---------------- */
 function attachCardClicks(){
   document.querySelectorAll('.ncr[data-ref]').forEach(el =>
@@ -948,19 +1001,65 @@ function openDetail(r){
         '<div class="field" data-req><label>Verified by</label>' + txt('verified', r.verified) + '</div>' +
         '<div class="field wide" data-req><label>Resolution notes</label>' + area('notes', r.notes) + '</div>' +
       '</div>' +
+      '<div class="draft-note" id="draftNote" hidden></div>' +
       '<div class="panel-actions">' +
         '<span class="save-msg" id="saveMsg"></span>' +
-        '<button class="btn btn-cancel" type="button">Cancel</button>' +
+        '<button class="btn btn-cancel" type="button">Close</button>' +
         '<button class="btn btn-save" type="button" id="saveBtn">Save to register</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(ov);
-  const onKey = e => { if (e.key === 'Escape' && !document.querySelector('.lightbox')) close(); };
+  const original = {
+    status: r.status || '', sev: r.sev || '', owner: r.owner || '', target: targetVal,
+    root: r.root || '', contain: r.contain || '', corrective: r.corrective || '',
+    verified: r.verified || '', notes: r.notes || ''
+  };
+  const changed = () => JSON.stringify(panelValues(ov)) !== JSON.stringify(original);
+
   const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
-  ov.addEventListener('click', e => { if (e.target === ov) close(); });
-  ov.querySelector('.panel-close').addEventListener('click', close);
-  ov.querySelector('.btn-cancel').addEventListener('click', close);
+  /* Nothing shuts this window by accident — a half-written root cause is too
+     easy to lose. Clicking the background does nothing at all. */
+  const tryClose = () => {
+    if (changed() && !window.confirm('You have changes that haven\u2019t been saved to the register.\n\n' +
+        'Close anyway? Your notes are kept on this device and will be waiting when you next open ' +
+        (r.ref || 'this NCR') + '.')) return;
+    close();
+  };
+  const onKey = e => { if (e.key === 'Escape' && !document.querySelector('.lightbox')) tryClose(); };
+  ov.querySelector('.panel-close').addEventListener('click', tryClose);
+  ov.querySelector('.btn-cancel').addEventListener('click', tryClose);
   document.addEventListener('keydown', onKey);
+
+  /* ---- put back anything typed but never saved ---- */
+  const note = ov.querySelector('#draftNote');
+  const draft = readDraft(r.ref);
+  if (draft && draft.fields && JSON.stringify(draft.fields) !== JSON.stringify(original)){
+    applyValues(ov, draft.fields);
+    note.hidden = false;
+    note.innerHTML = 'Notes you typed on ' +
+      new Date(draft.at).toLocaleString('en-GB', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) +
+      ' have been put back. They are not in the register until you save. ' +
+      '<button type="button" id="dropDraft">Discard them</button>';
+    note.querySelector('#dropDraft').addEventListener('click', () => {
+      clearDraft(r.ref);
+      applyValues(ov, original);
+      note.hidden = true;
+    });
+  }
+
+  /* ---- and keep it that way as they type ---- */
+  let pending = null;
+  const remember = () => {
+    clearTimeout(pending);
+    pending = setTimeout(() => {
+      if (changed()) writeDraft(r.ref, panelValues(ov)); else clearDraft(r.ref);
+    }, 400);
+  };
+  FIELD_IDS.forEach(k => {
+    const el = ov.querySelector('#f_' + k);
+    if (el){ el.addEventListener('input', remember); el.addEventListener('change', remember); }
+  });
+
   loadPhotos(ov, r);
 
   ov.querySelector('#saveBtn').addEventListener('click', async () => {
@@ -995,12 +1094,14 @@ function openDetail(r){
       const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, updates }) });
       const out = await res.json();
       if (!out.ok) throw new Error(out.error || 'Save failed');
+      clearDraft(r.ref);
       close();
       toast(r.ref + ' saved to the register');
       load();
     } catch (err) {
       btn.disabled = false;
-      msg.textContent = 'Couldn\u2019t save: ' + err.message;
+      writeDraft(r.ref, panelValues(ov));
+      msg.textContent = 'Couldn\u2019t save: ' + err.message + ' \u2014 your notes are kept, try again';
       msg.className = 'save-msg err';
     }
   });
@@ -1110,7 +1211,7 @@ function toast(text){
 }
 
 load();
-setInterval(() => { if (DATA) load(); }, 5 * 60 * 1000);  // auto-refresh every 5 min
+setInterval(backgroundRefresh, 5 * 60 * 1000);  // auto-refresh every 5 min
 </script>
 </body>
 </html>
