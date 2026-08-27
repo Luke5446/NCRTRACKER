@@ -332,6 +332,17 @@ function ownersOf(g){ const o = OWNERS[g]; return Array.isArray(o) ? o : (o ? [o
 function ownerText(g){ return ownersOf(g).join(', '); }
 function ownerWord(g){ return ownersOf(g).length > 1 ? 'Owners' : 'Owner'; }
 
+/* Our regular suppliers. Anything typed into Customer/Supplier that is a near
+   miss for one of these — a different case, a missing space, a trailing account
+   number, a slip of the fingers — is treated as that supplier, so each gets one
+   page in the report rather than one page per spelling.
+   ADD NEW SUPPLIERS HERE, spelled the way you want them to appear on a report
+   that goes out to them. */
+const SUPPLIERS = [
+  "Ralawise", "Clockwork", "PenCarrie", "Tiajo",
+  "Carrington", "Brook Taverner", "NewLace"
+];
+
 /* Departments whose NCRs are raised against an outside company, so their
    monthly report is worth producing one company at a time. */
 const EXTERNAL_DEPTS = ["Suppliers", "Logistics"];
@@ -699,25 +710,60 @@ function capitalise(name){
   return n ? n.charAt(0).toUpperCase() + n.slice(1) : n;
 }
 
+/* Snap a typed-in name onto one of our regular suppliers when it is clearly
+   meant to be one. Three ways it can match, in order of confidence:
+     1. the same once case, spaces and punctuation are ignored  ("brook taverner")
+     2. the supplier's name with something tacked on            ("Ralawise - 18499")
+     3. close enough to be a slip of the fingers                ("Ralwaise")
+   Returns the supplier's proper spelling, or null when it is nobody we know. */
+const SUPPLIER_KEYS = SUPPLIERS.map(n => ({ name: n, key: companyKey(n) }));
+function canonicalCompany(raw){
+  const k = companyKey(raw);
+  if (!k) return null;
+  let best = null, bestDist = Infinity;
+  for (let i = 0; i < SUPPLIER_KEYS.length; i++){
+    const s = SUPPLIER_KEYS[i];
+    if (k === s.key) return s.name;
+    /* an account number or "Ltd" on the end, or a name typed short */
+    if (s.key.length >= 5 && (k.indexOf(s.key) === 0 || s.key.indexOf(k) === 0)){
+      if (0 < bestDist){ best = s.name; bestDist = 0; }
+      continue;
+    }
+    /* a mistyped name: only worth guessing at when the lengths are close */
+    if (Math.abs(k.length - s.key.length) > 2) continue;
+    const allowed = s.key.length >= 8 ? 2 : 1;
+    const d = editDistance(k, s.key);
+    if (d <= allowed && d < bestDist){ best = s.name; bestDist = d; }
+  }
+  return best;
+}
+function isKnownSupplier(name){ return SUPPLIERS.indexOf(name) > -1; }
+
 function groupByCompany(rows){
   const buckets = {};
   rows.forEach(r => {
     const raw = String(r.cust || '').trim();
-    const k = companyKey(raw);
+    const known = canonicalCompany(raw);
+    const k = known ? companyKey(known) : companyKey(raw);
     if (!k) return;
-    const b = buckets[k] = buckets[k] || { rows: [], spellings: {} };
+    const b = buckets[k] = buckets[k] || { rows: [], spellings: {}, known: known };
     b.rows.push(r);
     b.spellings[raw] = (b.spellings[raw] || 0) + 1;
   });
   return Object.keys(buckets).map(k => {
     const b = buckets[k];
+    /* a supplier we know is always shown the way we spell it */
+    if (b.known){
+      const used = Object.keys(b.spellings).sort((a,x) => b.spellings[x] - b.spellings[a]);
+      return { key: k, name: b.known, rows: b.rows, spellings: used, known: true };
+    }
     /* the spelling used most often wins; a capitalised one breaks a tie, so
        "PenCarrie" survives rather than being flattened to "Pencarrie" */
     const names = Object.keys(b.spellings).sort((a, x) =>
       b.spellings[x] - b.spellings[a] ||
       (/^[A-Z]/.test(x) ? 1 : 0) - (/^[A-Z]/.test(a) ? 1 : 0) ||
       a.localeCompare(x));
-    return { key: k, name: capitalise(names[0]), rows: b.rows, spellings: names };
+    return { key: k, name: capitalise(names[0]), rows: b.rows, spellings: names, known: false };
   });
 }
 
@@ -750,8 +796,11 @@ function looksLikeTheSame(a, b){
 function nearMatches(names){
   const out = [];
   for (let i = 0; i < names.length; i++)
-    for (let j = i + 1; j < names.length; j++)
+    for (let j = i + 1; j < names.length; j++){
+      /* two suppliers off our own list are different companies by definition */
+      if (isKnownSupplier(names[i]) && isKnownSupplier(names[j])) continue;
       if (looksLikeTheSame(names[i], names[j])) out.push(names[i] + ' / ' + names[j]);
+    }
   return out;
 }
 
@@ -837,16 +886,23 @@ function supplierDoc(g, list, monthKey){
     .sort((a,b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name));
   const unnamed = list.length - companies.reduce((n,c) => n + c.rows.length, 0);
 
-  /* what was folded together, and what was left alone but looks suspicious */
-  const folded = companies.filter(c => c.spellings.length > 1)
-    .map(c => c.spellings.join(' / ') + ' \u2192 ' + c.name);
+  /* Say plainly what the app decided: which typed-in names it read as one of
+     our suppliers, which it merely tidied, and which it left alone. All three
+     are on screen only and never print. */
+  const changed = c => c.spellings.length > 1 || c.spellings[0] !== c.name;
+  const line = c => c.spellings.join(' / ') + ' \u2192 ' + c.name;
+  const matched = companies.filter(c => c.known && changed(c)).map(line);
+  const folded  = companies.filter(c => !c.known && changed(c)).map(line);
   const near = nearMatches(companies.map(c => c.name));
   const notes =
+    (matched.length ? '<div class="rp-warn"><b>Read as one of your suppliers.</b> These were typed ' +
+       'differently and have been put on that supplier\u2019s page: ' + esc(matched.join('; ')) + '.</div>' : '') +
     (folded.length ? '<div class="rp-warn"><b>Spellings joined up.</b> These were recorded more than one ' +
        'way and have been treated as the same company: ' + esc(folded.join('; ')) + '.</div>' : '') +
     (near.length ? '<div class="rp-warn"><b>Worth a look.</b> These are close enough to be the same ' +
        'company but different enough that they have not been joined: ' + esc(near.join('; ')) + '. ' +
-       'They each get their own page \u2014 tidy the register if they should be one.</div>' : '');
+       'They each get their own page \u2014 tidy the register, or add the name to the supplier ' +
+       'list, if they should be one.</div>' : '');
 
   if (!companies.length){
     return '<div class="rp">' + reportHead(g, monthKey, 'Supplier quality report') +
