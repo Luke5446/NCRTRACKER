@@ -688,6 +688,73 @@ function reportHead(g, monthKey, title){
     '</div>';
 }
 
+/* ---------------- company names ----------------
+   Customer and supplier names are typed by hand, so "Ralawise", "ralawise ",
+   "Pen Carrie" and "PenCarrie" all arrive looking like different companies and
+   each got its own report. Fold them on a key that ignores case, spacing and
+   punctuation, and show whichever spelling the team actually uses most. */
+function companyKey(name){ return String(name == null ? '' : name).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function capitalise(name){
+  const n = String(name == null ? '' : name).trim();
+  return n ? n.charAt(0).toUpperCase() + n.slice(1) : n;
+}
+
+function groupByCompany(rows){
+  const buckets = {};
+  rows.forEach(r => {
+    const raw = String(r.cust || '').trim();
+    const k = companyKey(raw);
+    if (!k) return;
+    const b = buckets[k] = buckets[k] || { rows: [], spellings: {} };
+    b.rows.push(r);
+    b.spellings[raw] = (b.spellings[raw] || 0) + 1;
+  });
+  return Object.keys(buckets).map(k => {
+    const b = buckets[k];
+    /* the spelling used most often wins; a capitalised one breaks a tie, so
+       "PenCarrie" survives rather than being flattened to "Pencarrie" */
+    const names = Object.keys(b.spellings).sort((a, x) =>
+      b.spellings[x] - b.spellings[a] ||
+      (/^[A-Z]/.test(x) ? 1 : 0) - (/^[A-Z]/.test(a) ? 1 : 0) ||
+      a.localeCompare(x));
+    return { key: k, name: capitalise(names[0]), rows: b.rows, spellings: names };
+  });
+}
+
+/* Folding case and spacing is safe. Actual typos are not — merging two real
+   companies by mistake would be worse than listing them twice — so near
+   matches are pointed out on screen and left alone. */
+/* Counts a swapped pair of letters as one slip rather than two, because
+   "Ralwaise" for "Ralawise" is how people actually mistype. */
+function editDistance(a, b){
+  const d = [];
+  for (let i = 0; i <= a.length; i++){ d[i] = [i]; }
+  for (let j = 0; j <= b.length; j++){ d[0][j] = j; }
+  for (let i = 1; i <= a.length; i++){
+    for (let j = 1; j <= b.length; j++){
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + cost);
+      if (i > 1 && j > 1 && a[i-1] === b[j-2] && a[i-2] === b[j-1]){
+        d[i][j] = Math.min(d[i][j], d[i-2][j-2] + 1);       /* two letters swapped */
+      }
+    }
+  }
+  return d[a.length][b.length];
+}
+function looksLikeTheSame(a, b){
+  const x = companyKey(a), y = companyKey(b);
+  if (x.length < 4 || y.length < 4) return false;      /* too short to call */
+  if (Math.abs(x.length - y.length) > 2) return false;
+  return editDistance(x, y) <= (Math.min(x.length, y.length) >= 8 ? 2 : 1);
+}
+function nearMatches(names){
+  const out = [];
+  for (let i = 0; i < names.length; i++)
+    for (let j = i + 1; j < names.length; j++)
+      if (looksLikeTheSame(names[i], names[j])) out.push(names[i] + ' / ' + names[j]);
+  return out;
+}
+
 function countBy(list, pick){
   const m = {};
   list.forEach(r => { const k = String(pick(r) || '').trim(); if (k) m[k] = (m[k] || 0) + 1; });
@@ -703,7 +770,9 @@ function summaryDoc(g, list, monthKey){
 
   /* what a manager should be ready to speak to */
   const severe = list.filter(r => (r.sev === 'Critical' || r.sev === 'Major') && r.status !== 'Closed');
-  const repeatCust = countBy(list, r => r.cust).filter(x => x[1] > 1);
+  const repeatCust = groupByCompany(list).filter(c => c.rows.length > 1)
+    .sort((a,b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name))
+    .map(c => [c.name, c.rows.length]);
   const repeatCause = cats.filter(x => x[1] > 1);
   const flags = [];
   list.filter(isLate).forEach(r => flags.push([r, daysLate(r) + ' days past target']));
@@ -764,20 +833,29 @@ function summaryDoc(g, list, monthKey){
    out anything internal: who reported it, who owns it, our root-cause analysis,
    and of course any other company's NCRs. */
 function supplierDoc(g, list, monthKey){
-  const named = list.filter(r => String(r.cust || '').trim());
-  const groups = {};
-  named.forEach(r => { const k = String(r.cust).trim(); (groups[k] = groups[k] || []).push(r); });
-  const order = Object.keys(groups).sort((a,b) => groups[b].length - groups[a].length || a.localeCompare(b));
-  const unnamed = list.length - named.length;
+  const companies = groupByCompany(list)
+    .sort((a,b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name));
+  const unnamed = list.length - companies.reduce((n,c) => n + c.rows.length, 0);
 
-  if (!order.length){
+  /* what was folded together, and what was left alone but looks suspicious */
+  const folded = companies.filter(c => c.spellings.length > 1)
+    .map(c => c.spellings.join(' / ') + ' \u2192 ' + c.name);
+  const near = nearMatches(companies.map(c => c.name));
+  const notes =
+    (folded.length ? '<div class="rp-warn"><b>Spellings joined up.</b> These were recorded more than one ' +
+       'way and have been treated as the same company: ' + esc(folded.join('; ')) + '.</div>' : '') +
+    (near.length ? '<div class="rp-warn"><b>Worth a look.</b> These are close enough to be the same ' +
+       'company but different enough that they have not been joined: ' + esc(near.join('; ')) + '. ' +
+       'They each get their own page \u2014 tidy the register if they should be one.</div>' : '');
+
+  if (!companies.length){
     return '<div class="rp">' + reportHead(g, monthKey, 'Supplier quality report') +
       '<p class="rp-none" style="margin-top:24px">No NCRs were recorded against a named company for ' +
       esc(g) + ' in ' + esc(monthLabelOf(monthKey)) + '.</p></div>';
   }
 
-  return order.map(name => {
-    const rs = groups[name];
+  return notes + companies.map(c => {
+    const name = c.name, rs = c.rows;
     const open = rs.filter(r => r.status !== 'Closed');
     const cats = countBy(rs, r => r.cat);
     return '<div class="rp rp-ext">' +
