@@ -247,15 +247,29 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .rp-notes .lines{margin-top:5px}
 .rp-notes .lines i{display:block;border-bottom:1px solid #C9D3DF;height:20px}
 
+.rp-warn{max-width:820px;margin:16px auto -6px;background:#FDF4F3;border:1px solid #E7B3AE;
+  border-left:3px solid var(--flag);border-radius:8px;padding:12px 16px;font-size:.86rem;color:var(--ink)}
+.rp-warn b{color:var(--flag)}
+.rp-ext+.rp-ext{margin-top:26px}
+.rp-to{margin-top:20px;padding:12px 0 10px;border-bottom:1px solid #CBD5E1}
+.rp-to .lbl{display:block;font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#555}
+.rp-to b{font-family:'Archivo',sans-serif;font-size:1.2rem;color:#1F3864}
+.rp-lead{font-size:.88rem;line-height:1.6;margin-top:14px;max-width:64ch}
+.rp-nums-3{grid-template-columns:repeat(3,1fr)}
+.rp-contact{margin-top:22px;border:1px solid #CBD5E1;border-radius:6px;padding:12px 14px;font-size:.86rem;line-height:1.6}
+.rp-contact b{color:#1F3864}
+.rp-contact .mono{font-family:'IBM Plex Mono',monospace;font-size:.84rem}
+
 @media (max-width:620px){ .rp{padding:22px 18px;margin:12px} .rp-nums{grid-template-columns:repeat(2,1fr)} }
 
 @media print{
-  header,.seam,footer,main,.overlay,.toast,.report-bar{display:none !important}
+  header,.seam,footer,main,.overlay,.toast,.report-bar,.rp-warn{display:none !important}
   body{background:#fff}
   .report-view{position:static;overflow:visible;background:#fff}
   .rp{max-width:none;margin:0;padding:0;box-shadow:none}
   .rp-case{page-break-inside:avoid}
   .rp-case+.rp-case{page-break-before:always;border-top:none;margin-top:0;padding-top:0}
+  .rp-ext+.rp-ext{page-break-before:always;margin-top:0}
   .rp h2{page-break-after:avoid}
   tr{page-break-inside:avoid}
   a{text-decoration:none;color:#111}
@@ -301,12 +315,23 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 const API_URL = "https://script.google.com/macros/s/AKfycbyfpl9AnvGr5zv-Vimh04no7LhYD2RV6ZZMlyan2BQhWPHLqKZlbjDB0x0y-Y9qLfw5/exec";
 const APP_KEY = "tibard-ncr-2026";   // must match APP_KEY in the Apps Script
 const STALE_DAYS = 7;                    // flag if still "Open" after this many days
+const REPORT_CONTACT = "NCR@tibard.co.uk";   // shown on reports that go outside the company
 const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
+/* A department can be owned by more than one person — list them in an array. */
 const OWNERS = {
-  "Sales":"Duncan", "Suppliers":"Duncan", "Logistics":"Duncan", "IT & Digital":"Ben",
+  "Sales":"Duncan", "Suppliers":"Duncan", "IT & Digital":"Ben",
   "Production":"Gail", "EMB":"Sharon", "Stores":"Ste",
-  "Accounts":"Vanessa", "ISO/QC":"Yvonne", "Procurement":"Duncan", "Other":"Luke H"
+  "Accounts":"Vanessa", "ISO/QC":"Yvonne", "Other":"Luke H",
+  "Procurement": ["Duncan", "Ben", "Luke H"],
+  "Logistics":   ["Duncan", "Ste", "Luke H"]
 };
+function ownersOf(g){ const o = OWNERS[g]; return Array.isArray(o) ? o : (o ? [o] : []); }
+function ownerText(g){ return ownersOf(g).join(', '); }
+function ownerWord(g){ return ownersOf(g).length > 1 ? 'Owners' : 'Owner'; }
+
+/* Departments whose NCRs are raised against an outside company, so their
+   monthly report is worth producing one company at a time. */
+const EXTERNAL_DEPTS = ["Suppliers", "Logistics"];
 /* Carriers are reviewed together as Logistics. The register still records which
    one it was in column C — this only groups them for the managers' view. */
 const LOGISTICS = ["DPD", "H&B", "Logistics"];
@@ -445,7 +470,7 @@ function renderMainBody(){
     html +=
       '<button class="dept-card" type="button" data-dept="' + esc(g) + '">' +
         '<div class="dept-name">' + esc(g) + '</div>' +
-        '<div class="dept-owner">' + esc(OWNERS[g] || '') + '</div>' +
+        '<div class="dept-owner">' + esc(ownerText(g)) + '</div>' +
         '<div class="dept-stats">' +
           '<span><span class="big">' + nNew + '</span> <span class="small">new</span></span>' +
           '<span><span class="big">' + nOpen + '</span> <span class="small">outstanding</span></span>' +
@@ -531,13 +556,14 @@ function renderDept(){
 
   let html =
     '<button class="back" type="button" id="backBtn">&larr; All departments</button>' +
-    '<div class="dept-head"><h1>' + esc(g) + '</h1><span class="owner">Owner: ' + esc(OWNERS[g] || '&mdash;') + '</span></div>' +
+    '<div class="dept-head"><h1>' + esc(g) + '</h1><span class="owner">' + ownerWord(g) + ': ' +
+      (ownerText(g) ? esc(ownerText(g)) : '&mdash;') + '</span></div>' +
     '<div class="kpis">' +
       kpi(openOnly.length, 'Outstanding') +
       kpi(prog.length, 'In progress') +
       kpi(stale.length, 'Not actioned in ' + STALE_DAYS + ' days', true) +
     '</div>' +
-    meetingBar(rs) +
+    meetingBar(rs, g) +
     '<div class="searchbar">' +
       '<input type="search" id="q" placeholder="Search by NCR number, order, customer or keyword&hellip;" value="' + esc(view.search) + '" autocomplete="off">' +
       '<label class="toggle"><input type="checkbox" id="showClosed"' + (view.showClosed ? ' checked' : '') + '> Show closed</label>' +
@@ -554,7 +580,7 @@ function renderDept(){
 }
 
 /* ---------------- monthly meeting reports ---------------- */
-function meetingBar(rs){
+function meetingBar(rs, g){
   const months = monthsPresent(rs);
   if (!months.length) return '';
   const now = monthKeyOf(new Date().toISOString());
@@ -569,6 +595,8 @@ function meetingBar(rs){
       '</select>' +
       '<button class="btn-report solid" type="button" id="btnSummary">Monthly summary</button>' +
       '<button class="btn-report" type="button" id="btnCases">Print each NCR</button>' +
+      (EXTERNAL_DEPTS.indexOf(g) > -1
+        ? '<button class="btn-report" type="button" id="btnSuppliers">Report per company</button>' : '') +
     '</div>';
 }
 
@@ -582,9 +610,12 @@ function wireMeetingBar(g, rs){
     openReport('Monthly summary', summaryDoc(g, forMonth(), view.month)));
   document.getElementById('btnCases').addEventListener('click', () =>
     openReport('NCR case pack', casesDoc(g, forMonth(), view.month)));
+  const sup = document.getElementById('btnSuppliers');
+  if (sup) sup.addEventListener('click', () =>
+    openReport('Report per company', supplierDoc(g, forMonth(), view.month), true));
 }
 
-function openReport(title, docHtml){
+function openReport(title, docHtml, outgoing){
   const v = document.createElement('div');
   v.className = 'report-view';
   v.innerHTML =
@@ -593,7 +624,12 @@ function openReport(title, docHtml){
       '<span class="title">' + esc(title) + '</span>' +
       '<span class="spacer"></span>' +
       '<button type="button" class="go" id="rpPrint">Print</button>' +
-    '</div>' + docHtml;
+    '</div>' +
+    (outgoing
+      ? '<div class="rp-warn"><b>Read this before you send it.</b> The descriptions are whatever staff ' +
+        'typed when they raised the NCR, and were written for us rather than for the company receiving it. ' +
+        'One page per company &mdash; print the lot, or use your printer\u2019s page range to send just one.</div>'
+      : '') + docHtml;
   document.body.appendChild(v);
   window.scrollTo(0, 0);
   const shut = () => { v.remove(); document.removeEventListener('keydown', onKey); };
@@ -608,7 +644,7 @@ function reportHead(g, monthKey, title){
       '<img src="tibard-logo.jpg" alt="Tibard" onerror="this.remove()">' +
       '<div><div class="rp-title">' + esc(title) + '</div>' +
         '<div class="rp-sub">' + esc(g) + ' &middot; ' + esc(monthLabelOf(monthKey)) + '</div></div>' +
-      '<div class="who">Owner: ' + esc(OWNERS[g] || '\u2014') + '<br>' +
+      '<div class="who">' + ownerWord(g) + ': ' + esc(ownerText(g) || '\u2014') + '<br>' +
         'Printed ' + new Date().toLocaleDateString('en-GB', {day:'numeric', month:'long', year:'numeric'}) + '</div>' +
     '</div>';
 }
@@ -682,6 +718,80 @@ function summaryDoc(g, list, monthKey){
       new Date().toLocaleString('en-GB', {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'}) +
       '. Figures cover NCRs raised in ' + esc(monthLabelOf(monthKey)) + ' only.</div>' +
   '</div>';
+}
+
+/* One page per outside company, written to be sent to them. Deliberately leaves
+   out anything internal: who reported it, who owns it, our root-cause analysis,
+   and of course any other company's NCRs. */
+function supplierDoc(g, list, monthKey){
+  const named = list.filter(r => String(r.cust || '').trim());
+  const groups = {};
+  named.forEach(r => { const k = String(r.cust).trim(); (groups[k] = groups[k] || []).push(r); });
+  const order = Object.keys(groups).sort((a,b) => groups[b].length - groups[a].length || a.localeCompare(b));
+  const unnamed = list.length - named.length;
+
+  if (!order.length){
+    return '<div class="rp">' + reportHead(g, monthKey, 'Supplier quality report') +
+      '<p class="rp-none" style="margin-top:24px">No NCRs were recorded against a named company for ' +
+      esc(g) + ' in ' + esc(monthLabelOf(monthKey)) + '.</p></div>';
+  }
+
+  return order.map(name => {
+    const rs = groups[name];
+    const open = rs.filter(r => r.status !== 'Closed');
+    const cats = countBy(rs, r => r.cat);
+    return '<div class="rp rp-ext">' +
+      '<div class="rp-head">' +
+        '<img src="tibard-logo.jpg" alt="Tibard" onerror="this.remove()">' +
+        '<div><div class="rp-title">Supplier quality report</div>' +
+          '<div class="rp-sub">' + esc(monthLabelOf(monthKey)) + '</div></div>' +
+        '<div class="who">Issued ' +
+          new Date().toLocaleDateString('en-GB', {day:'numeric', month:'long', year:'numeric'}) + '</div>' +
+      '</div>' +
+
+      '<div class="rp-to"><span class="lbl">Prepared for</span><b>' + esc(name) + '</b></div>' +
+
+      '<p class="rp-lead">This report lists the non-conformances Tibard recorded against ' + esc(name) +
+        ' during ' + esc(monthLabelOf(monthKey)) + ', as part of our routine supplier quality monitoring. ' +
+        'It is shared so that both sides are working from the same record.</p>' +
+
+      '<div class="rp-nums rp-nums-3">' +
+        '<div class="rp-num"><b>' + rs.length + '</b><span>Raised this month</span></div>' +
+        '<div class="rp-num"><b>' + open.length + '</b><span>Still open</span></div>' +
+        '<div class="rp-num"><b>' + (rs.length - open.length) + '</b><span>Closed</span></div>' +
+      '</div>' +
+
+      '<h2>Reasons recorded</h2>' +
+      '<table><thead><tr><th class="n">No.</th><th>Reason</th></tr></thead><tbody>' +
+        cats.map(c => '<tr><td class="n">' + c[1] + '</td><td>' + esc(c[0]) + '</td></tr>').join('') +
+      '</tbody></table>' +
+
+      '<h2>The individual items</h2>' +
+      '<table><thead><tr><th>Our ref</th><th>Date</th><th>Order</th><th>What we recorded</th><th>Status</th></tr></thead><tbody>' +
+        rs.map(r => '<tr>' +
+          '<td class="ref">' + esc(r.ref || '\u2014') + '</td>' +
+          '<td>' + fmtDate(r.ts) + '</td>' +
+          '<td>' + esc(r.order || '\u2014') + '</td>' +
+          '<td>' + esc(String(r.what)) + '</td>' +
+          '<td>' + esc(r.status === 'Closed' ? 'Closed' : 'Open') + '</td></tr>').join('') +
+      '</tbody></table>' +
+
+      '<div class="rp-contact">' +
+        '<b>Any questions on the above?</b><br>' +
+        'Please get in touch and quote the reference shown against the item.<br>' +
+        '<span class="mono">' + esc(REPORT_CONTACT) + '</span>' +
+      '</div>' +
+
+      '<div class="rp-foot">Tibard Ltd &middot; issued ' +
+        new Date().toLocaleDateString('en-GB', {day:'numeric', month:'long', year:'numeric'}) +
+        '. Covers ' + esc(monthLabelOf(monthKey)) + ' only.</div>' +
+    '</div>';
+  }).join('') +
+  (unnamed
+    ? '<div class="rp rp-ext"><div class="rp-foot" style="margin:0">' + unnamed + ' NCR' +
+      (unnamed === 1 ? ' was' : 's were') + ' raised this month without a company recorded against ' +
+      'them, so ' + (unnamed === 1 ? 'it is' : 'they are') + ' not on any of the pages above.</div></div>'
+    : '');
 }
 
 function casesDoc(g, list, monthKey){
