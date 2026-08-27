@@ -67,6 +67,17 @@ main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
 .kpi-btn .lbl::after{content:" \25BE";font-size:.9em}
 .kpi-btn.on{box-shadow:0 6px 16px rgba(31,56,100,.14)}
 .kpi-btn.on .lbl::after{content:" \25B4"}
+/* department tiles filter the list below rather than expanding */
+.kpi-filter .lbl::after{content:""}
+/* the hint sits on every tile so they stay the same height as one is tapped */
+.kpi-filter::after{content:"Tap to show only these";display:block;margin-top:6px;
+  font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.kpi-filter.on{border-color:var(--ink);box-shadow:0 6px 16px rgba(31,56,100,.14)}
+.kpi-filter.on::after{content:"Showing these \2014\A0tap to clear";color:var(--ink)}
+.kpi-filter.flagged.on{border-color:var(--flag)}
+.kpi-filter.flagged.on::after{color:var(--flag)}
+.kpi-filter:disabled{cursor:default;opacity:.65}
+.kpi-filter:disabled::after{visibility:hidden}
 
 /* department breakdown opened from a tile */
 .breakdown{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:26px}
@@ -224,9 +235,14 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .rp table{width:100%;border-collapse:collapse;font-size:.85rem}
 .rp th{text-align:left;font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:#555;
   border-bottom:1px solid #CBD5E1;padding:5px 7px 5px 0}
-.rp td{padding:6px 7px 6px 0;border-bottom:1px solid #E6EBF1;vertical-align:top}
-.rp td.n,.rp th.n{width:46px;font-variant-numeric:tabular-nums;font-weight:700;color:#1F3864}
-.rp td.ref{white-space:nowrap;font-family:'IBM Plex Mono',monospace;font-size:.8rem;font-weight:600}
+.rp td{padding:7px 20px 7px 0;border-bottom:1px solid #E6EBF1;vertical-align:top}
+.rp th{padding-right:20px}
+.rp td:last-child,.rp th:last-child{padding-right:0}
+.rp td.n,.rp th.n{width:64px;font-variant-numeric:tabular-nums;font-weight:700;color:#1F3864}
+.rp td.ref{white-space:nowrap;font-family:'IBM Plex Mono',monospace;font-size:.82rem;font-weight:700}
+.rp th.ref{width:52px}
+.rp td.dt,.rp td.st{white-space:nowrap}
+.rp th.dt{width:70px} .rp th.st{width:92px} .rp th.sv{width:78px}
 .rp-flag{border-left:3px solid #C1352C;padding:8px 0 8px 12px;margin-bottom:10px;font-size:.87rem}
 .rp-flag b{font-family:'IBM Plex Mono',monospace;font-size:.82rem}
 .rp-flag .why{color:#C1352C;font-weight:700;font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
@@ -360,7 +376,7 @@ function statusLabel(v){ return STATUS_LABEL[v] || v; }
 /* ========================================== */
 
 let DATA = null;
-let view = { dept: null, search: "", showClosed: false, metric: null, q: "", month: "" };
+let view = { dept: null, search: "", showClosed: false, metric: null, q: "", month: "", filter: null };
 
 const $app = document.getElementById('app');
 const $updated = document.getElementById('updated');
@@ -534,7 +550,7 @@ function renderMainBody(){
   html += '</div>';
   wrap.innerHTML = html;
   wrap.querySelectorAll('.dept-card').forEach(b =>
-    b.addEventListener('click', () => { view = { dept: b.dataset.dept, search: "", showClosed: false, metric: null, q: "" }; render(); window.scrollTo(0,0); }));
+    b.addEventListener('click', () => { view = { dept: b.dataset.dept, search: "", showClosed: false, metric: null, q: "", month: "", filter: null }; render(); window.scrollTo(0,0); }));
   wrap.querySelectorAll('.kpi-btn').forEach(b =>
     b.addEventListener('click', () => {
       view.metric = (view.metric === b.dataset.metric) ? null : b.dataset.metric;
@@ -596,22 +612,34 @@ function kpi(n, label, flagged){
 }
 
 /* ---------------- department view ---------------- */
+/* The three department tiles. Each one filters the list underneath it, so a
+   manager can tap "Late" and see only the late ones. Tap again to clear. */
+const DEPT_FILTERS = [
+  { key: 'open',  label: 'Not actioned', test: r => r.status === 'Open' },
+  { key: 'prog',  label: 'In progress',  test: r => r.status === 'In Progress' },
+  { key: 'late',  label: 'Late',         test: isLate, flag: true }
+];
+function filterTest(key){
+  const f = DEPT_FILTERS.filter(x => x.key === key)[0];
+  return f ? f.test : null;
+}
+
 function renderDept(){
   const g = view.dept;
   const rs = DATA.rows.filter(r => groupDept(r.dept) === g);
-  const live = rs.filter(isLive);
-  const late = rs.filter(isLate);
-  const openOnly = rs.filter(r => r.status === 'Open');
-  const slow = rs.filter(isStale);
 
   let html =
     '<button class="back" type="button" id="backBtn">&larr; All departments</button>' +
     '<div class="dept-head"><h1>' + esc(g) + '</h1><span class="owner">' + ownerWord(g) + ': ' +
       (ownerText(g) ? esc(ownerText(g)) : '&mdash;') + '</span></div>' +
     '<div class="kpis">' +
-      kpi(openOnly.length, 'Outstanding') +
-      kpi(slow.length, 'Not actioned in ' + STALE_DAYS + ' days', true) +
-      kpi(late.length, 'Late', true) +
+      DEPT_FILTERS.map(f => {
+        const n = rs.filter(f.test).length;
+        return '<button type="button" class="kpi kpi-filter' + (f.flag && n ? ' flagged' : '') +
+          (view.filter === f.key ? ' on' : '') + '" data-filter="' + f.key + '"' +
+          (n ? '' : ' disabled') + ' aria-pressed="' + (view.filter === f.key) + '">' +
+          '<div class="num">' + n + '</div><div class="lbl">' + f.label + '</div></button>';
+      }).join('') +
     '</div>' +
     meetingBar(rs, g) +
     '<div class="searchbar">' +
@@ -621,7 +649,12 @@ function renderDept(){
     '<div id="listWrap"></div>';
 
   $app.innerHTML = html;
-  document.getElementById('backBtn').addEventListener('click', () => { view.dept = null; view.metric = null; render(); });
+  document.getElementById('backBtn').addEventListener('click', () => { view.dept = null; view.metric = null; view.filter = null; render(); });
+  Array.prototype.forEach.call($app.querySelectorAll('.kpi-filter'), b =>
+    b.addEventListener('click', () => {
+      view.filter = view.filter === b.dataset.filter ? null : b.dataset.filter;
+      renderDept();
+    }));
   const q = document.getElementById('q');
   q.addEventListener('input', () => { view.search = q.value; renderList(rs); });
   document.getElementById('showClosed').addEventListener('change', e => { view.showClosed = e.target.checked; renderList(rs); });
@@ -657,7 +690,7 @@ function wireMeetingBar(g, rs){
   const forMonth = () => rs.filter(r => monthKeyOf(r.ts) === view.month)
                           .sort((a,b) => (a.ts < b.ts ? -1 : 1));
   document.getElementById('btnSummary').addEventListener('click', () =>
-    openReport('Monthly summary', summaryDoc(g, forMonth(), view.month)));
+    openReport('Monthly summary', summaryDoc(g, forMonth(), view.month, rs)));
   document.getElementById('btnCases').addEventListener('click', () =>
     openReport('NCR case pack', casesDoc(g, forMonth(), view.month)));
   const sup = document.getElementById('btnSuppliers');
@@ -810,7 +843,15 @@ function countBy(list, pick){
   return Object.keys(m).sort((a,b) => m[b] - m[a] || a.localeCompare(b)).map(k => [k, m[k]]);
 }
 
-function summaryDoc(g, list, monthKey){
+/* On a meeting document everyone knows the year and that it is an NCR, so
+   NCR-2026-238 is just 238. Kept in full on the case pack and on anything
+   that goes outside the company. */
+function shortRef(ref){
+  const m = String(ref == null ? '' : ref).match(/(\d+)\s*$/);
+  return m ? m[1] : String(ref || '\u2014');
+}
+
+function summaryDoc(g, list, monthKey, all){
   const outstanding = list.filter(r => r.status === 'Open');
   const prog = list.filter(r => r.status === 'In Progress');
   const closed = list.filter(r => r.status === 'Closed');
@@ -823,38 +864,58 @@ function summaryDoc(g, list, monthKey){
     .sort((a,b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name))
     .map(c => [c.name, c.rows.length]);
   const repeatCause = cats.filter(x => x[1] > 1);
+  /* Raised before this month and still not finished. These belong on the agenda
+     even though they are not this month's work — someone owes an update. */
+  const carried = (all || []).filter(r => monthKeyOf(r.ts) < monthKey && r.status !== 'Closed')
+    .sort((a,b) => (a.ts < b.ts ? -1 : 1));
   const flags = [];
   list.filter(isLate).forEach(r => flags.push([r, daysLate(r) + ' days past target']));
   stale.forEach(r => { if (!isLate(r)) flags.push([r, daysSince(r.ts) + ' days, not actioned']); });
   severe.forEach(r => { if (!isStale(r) && !isLate(r)) flags.push([r, r.sev + ', still open']); });
 
-  if (!list.length){
+  if (!list.length && !carried.length){
     return '<div class="rp">' + reportHead(g, monthKey, 'NCR monthly summary') +
       '<p class="rp-none" style="margin-top:24px">No NCRs were raised for ' + esc(g) +
-      ' in ' + esc(monthLabelOf(monthKey)) + '.</p></div>';
+      ' in ' + esc(monthLabelOf(monthKey)) + ', and nothing is outstanding from before.</p></div>';
   }
 
   return '<div class="rp">' + reportHead(g, monthKey, 'NCR monthly summary') +
     '<div class="rp-nums">' +
       '<div class="rp-num"><b>' + list.length + '</b><span>Raised</span></div>' +
-      '<div class="rp-num"><b>' + outstanding.length + '</b><span>Outstanding</span></div>' +
+      '<div class="rp-num"><b>' + outstanding.length + '</b><span>Not actioned</span></div>' +
       '<div class="rp-num"><b>' + prog.length + '</b><span>In progress</span></div>' +
       '<div class="rp-num"><b>' + closed.length + '</b><span>Closed</span></div>' +
-      '<div class="rp-num' + (stale.length ? ' warn' : '') + '"><b>' + stale.length + '</b><span>Not actioned</span></div>' +
+      (carried.length
+        ? '<div class="rp-num warn"><b>' + carried.length + '</b><span>Carried over</span></div>'
+        : '') +
     '</div>' +
 
     '<h2>Why they happened</h2>' +
     (cats.length
-      ? '<table><thead><tr><th class="n">No.</th><th>Reason</th></tr></thead><tbody>' +
-        cats.map(c => '<tr><td class="n">' + c[1] + '</td><td>' + esc(c[0]) + '</td></tr>').join('') +
+      ? '<table><thead><tr><th>Reason for NCR</th><th class="n">Count</th></tr></thead><tbody>' +
+        cats.map(c => '<tr><td>' + esc(c[0]) + '</td><td class="n">' + c[1] + '</td></tr>').join('') +
         '</tbody></table>'
       : '<p class="rp-none">No issue categories recorded.</p>') +
 
     '<h2>Worth raising at the meeting</h2>' +
     (flags.length
       ? flags.map(f => '<div class="rp-flag"><span class="why">' + esc(f[1]) + '</span><br>' +
-          '<b>' + esc(f[0].ref) + '</b> &mdash; ' + esc(String(f[0].what).slice(0, 180)) + '</div>').join('')
+          '<b>' + esc(shortRef(f[0].ref)) + '</b> &mdash; ' + esc(String(f[0].what).slice(0, 180)) + '</div>').join('')
       : '<p class="rp-none">Nothing outstanding beyond ' + STALE_DAYS + ' days, and no critical or major NCRs still open.</p>') +
+
+    /* raised earlier, still not finished — an update is owed on each of these */
+    (carried.length
+      ? '<h2>Still going from earlier months</h2>' +
+        '<table><thead><tr><th class="ref">Ref</th><th class="dt">Raised</th><th class="st">Status</th>' +
+          '<th class="dt">Age</th><th>What happened</th></tr></thead><tbody>' +
+        carried.map(r => '<tr>' +
+          '<td class="ref">' + esc(shortRef(r.ref)) + '</td>' +
+          '<td class="dt">' + fmtDate(r.ts) + '</td>' +
+          '<td class="st">' + esc(statusLabel(r.status)) + '</td>' +
+          '<td class="dt">' + daysSince(r.ts) + ' days</td>' +
+          '<td>' + esc(String(r.what).slice(0, 150)) + '</td></tr>').join('') +
+        '</tbody></table>'
+      : '') +
     (repeatCause.length || repeatCust.length
       ? '<p style="font-size:.85rem;margin-top:10px">' +
           (repeatCause.length ? '<b>Recurring reasons:</b> ' + repeatCause.map(c => esc(c[0]) + ' (' + c[1] + ')').join(', ') + '. ' : '') +
@@ -863,18 +924,23 @@ function summaryDoc(g, list, monthKey){
       : '') +
 
     '<h2>Every NCR this month</h2>' +
-    '<table><thead><tr><th>Ref</th><th>Raised</th><th>Status</th><th>Severity</th><th>What happened</th></tr></thead><tbody>' +
-      list.map(r => '<tr>' +
-        '<td class="ref">' + esc(r.ref || '\u2014') + '</td>' +
-        '<td>' + fmtDate(r.ts) + '</td>' +
-        '<td>' + esc(statusLabel(r.status)) + '</td>' +
-        '<td>' + esc(r.sev || '\u2014') + '</td>' +
-        '<td>' + esc(String(r.what).slice(0, 150)) + '</td></tr>').join('') +
-    '</tbody></table>' +
+    (list.length
+      ? '<table><thead><tr><th class="ref">Ref</th><th class="dt">Raised</th><th class="st">Status</th>' +
+          '<th class="sv">Severity</th><th>What happened</th></tr></thead><tbody>' +
+        list.map(r => '<tr>' +
+          '<td class="ref">' + esc(shortRef(r.ref)) + '</td>' +
+          '<td class="dt">' + fmtDate(r.ts) + '</td>' +
+          '<td class="st">' + esc(statusLabel(r.status)) + '</td>' +
+          '<td>' + esc(r.sev || '\u2014') + '</td>' +
+          '<td>' + esc(String(r.what).slice(0, 150)) + '</td></tr>').join('') +
+        '</tbody></table>'
+      : '<p class="rp-none">Nothing new was raised this month.</p>') +
 
     '<div class="rp-foot">Taken from the NCR register on ' +
       new Date().toLocaleString('en-GB', {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'}) +
-      '. Figures cover NCRs raised in ' + esc(monthLabelOf(monthKey)) + ' only.</div>' +
+      '. The figures cover NCRs raised in ' + esc(monthLabelOf(monthKey)) + '.' +
+      (carried.length ? ' Anything raised earlier and still not closed is listed separately.' : '') +
+      '</div>' +
   '</div>';
 }
 
@@ -1012,6 +1078,9 @@ function casesDoc(g, list, monthKey){
 function renderList(rs){
   const term = view.search.trim().toLowerCase();
   let list = view.showClosed ? rs.slice() : rs.filter(isLive);
+  /* a tile is tapped: show only those. All three exclude closed anyway. */
+  const only = filterTest(view.filter);
+  if (only) list = list.filter(only);
 
   if (term){
     list = list.filter(r =>
@@ -1031,15 +1100,21 @@ function renderList(rs){
     list.sort((a,b) => rank(a) - rank(b) || (a.ts < b.ts ? 1 : -1));
   }
 
+  const filterName = only ? DEPT_FILTERS.filter(f => f.key === view.filter)[0].label.toLowerCase() : '';
   const wrap = document.getElementById('listWrap');
   if (!list.length){
-    wrap.innerHTML = '<div class="state"><strong>' + (term ? 'No NCRs match "' + esc(view.search) + '"' : 'Nothing outstanding') + '</strong>' +
-      (term ? 'Try just the number, e.g. <code>176</code>.' : 'No outstanding NCRs in this department. Tick "Show closed" to see history.') + '</div>';
+    wrap.innerHTML = '<div class="state"><strong>' +
+      (term ? 'No NCRs match "' + esc(view.search) + '"'
+            : only ? 'Nothing ' + esc(filterName) : 'Nothing outstanding') + '</strong>' +
+      (term ? 'Try just the number, e.g. <code>176</code>.'
+            : only ? 'Tap the tile again to see the rest.'
+            : 'No outstanding NCRs in this department. Tick "Show closed" to see history.') + '</div>';
     return;
   }
 
   wrap.innerHTML =
-    '<p class="count-line">' + list.length + ' NCR' + (list.length === 1 ? '' : 's') + (view.showClosed ? ' (incl. closed)' : ' outstanding') + '</p>' +
+    '<p class="count-line">' + list.length + ' NCR' + (list.length === 1 ? '' : 's') +
+      (only ? ' \u2014 ' + esc(filterName) : view.showClosed ? ' (incl. closed)' : ' outstanding') + '</p>' +
     '<div class="ncr-list">' + list.map(card).join('') + '</div>';
   attachCardClicks();
 }
