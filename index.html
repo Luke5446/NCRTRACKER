@@ -90,6 +90,14 @@ main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
 .breakdown .none{font-size:.88rem;color:var(--muted)}
 
 .section-title{font-family:'Archivo',sans-serif;font-weight:700;font-size:.85rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink);margin:0 0 12px}
+/* the by-month strip under the tiles */
+.months{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-2px 0 20px}
+.months .lbl{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:4px}
+.month-chip{font:inherit;font-size:.82rem;font-weight:600;color:var(--ink);background:var(--card);border:1px solid var(--line);
+  border-radius:999px;padding:6px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.month-chip b{font-family:'Archivo',sans-serif;font-weight:800;font-size:.9rem}
+.month-chip:hover{border-color:var(--ink)}
+.month-chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
 
 .dept-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
 /* department card styled as a garment swing-tag: punched hole + stitched top seam */
@@ -501,12 +509,17 @@ function render(){ view.dept ? renderDept() : renderOverview(); }
 /* ---------------- overview ---------------- */
 /* The four headline tiles. Tap one to see the same figure split by department. */
 function metrics(){
-  return {
+  const M = {
     last: { label: 'NCRs in ' + monthName(-1), test: r => inMonth(r, -1) },
     this: { label: 'NCRs in ' + monthName(0),  test: r => inMonth(r, 0) },
     late: { label: 'Late', title: 'Late (past target date)', test: isLate, flag: true },
     stale:{ label: 'Not actioned in ' + STALE_DAYS + ' days', test: isStale, flag: true }
   };
+  /* and one per month the register has seen, so July is still there in September */
+  monthsPresent(DATA.rows).forEach(k => {
+    M['m:' + k] = { label: 'NCRs in ' + monthLabelOf(k), month: k, test: r => monthKeyOf(r.ts) === k };
+  });
+  return M;
 }
 
 function renderOverview(){
@@ -540,9 +553,11 @@ function renderMainBody(){
   /* alphabetical, so people can find their own department at a glance */
   const order = Object.keys(groups).sort((a,b) => a.localeCompare(b));
 
+  const tiles = Object.keys(M).filter(k => !M[k].month);
+  const months = Object.keys(M).filter(k => M[k].month);
   let html =
     '<div class="kpis">' +
-      Object.keys(M).map(k => {
+      tiles.map(k => {
         const m = M[k];
         return '<button type="button" class="kpi kpi-btn' + (m.flag ? ' flagged' : '') +
           (view.metric === k ? ' on' : '') + '" data-metric="' + k + '">' +
@@ -550,6 +565,13 @@ function renderMainBody(){
           '<div class="lbl">' + esc(m.label) + '</div></button>';
       }).join('') +
     '</div>' +
+    /* every month on record, newest first; tap one for the department split */
+    (months.length
+      ? '<div class="months"><span class="lbl">By month</span>' +
+        months.map(k => '<button type="button" class="month-chip' + (view.metric === k ? ' on' : '') +
+          '" data-metric="' + k + '">' + esc(monthLabelOf(M[k].month)) + '<b>' + rows.filter(M[k].test).length + '</b></button>').join('') +
+        '</div>'
+      : '') +
     '<div id="breakdown"></div>' +
     '<h2 class="section-title">Departments &mdash; tap yours</h2>' +
     '<div class="dept-grid">';
@@ -577,7 +599,7 @@ function renderMainBody(){
   wrap.innerHTML = html;
   wrap.querySelectorAll('.dept-card').forEach(b =>
     b.addEventListener('click', () => { view = { dept: b.dataset.dept, search: "", showClosed: false, metric: null, q: "", month: "", filter: null }; render(); window.scrollTo(0,0); }));
-  wrap.querySelectorAll('.kpi-btn').forEach(b =>
+  wrap.querySelectorAll('.kpi-btn, .month-chip').forEach(b =>
     b.addEventListener('click', () => {
       view.metric = (view.metric === b.dataset.metric) ? null : b.dataset.metric;
       renderMainBody();
