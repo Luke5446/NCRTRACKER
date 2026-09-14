@@ -61,6 +61,26 @@ And one field inside the `rows.push({ ... })` block:
 photos: photosForRow_(headers, r),
 ```
 
+## September 2026: closing an NCR by hand in the sheet
+
+`Code.gs` gained one function at the bottom, `onEdit`. The app has always refused to
+close an NCR until every field is filled in, but the sheet itself would let anyone pick
+"Closed" from the dropdown with the row half empty — which is how 181 of the closed NCRs
+came to be missing things like *Verified by* and *Resolution notes*. Now, if Status is
+set to Closed on a row that is missing any of the eight required fields, the previous
+status is put straight back and a note appears on the cell saying what is missing.
+
+**To apply it:** open `Code.gs`, select all, delete, paste in the whole of `Code.gs`
+from this folder, and **Save**. That is all — `onEdit` runs from the saved script, not
+from the deployment, so **no redeploy is needed** this time, and it does not ask for any
+new permissions.
+
+The eight fields, the same as in the app: Severity, Owner, Root Cause, Containment
+Action, Corrective Action, Target Complete Date, Verified by, Resolution notes.
+
+The app now also points out the older NCRs that were closed with gaps — on the card,
+in the NCR window, and on the monthly summary — so they can be finished off.
+
 ## Notes
 
 - **Nothing in Drive gets re-shared.** The script runs as the sheet owner and hands the

@@ -133,6 +133,7 @@ main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
 .pill.open{background:#FBF0E2;color:#9A5A17;border:1px solid #EBCDA5}
 .pill.prog{background:#E8EEF4;color:var(--prog);border:1px solid #C4D2DE}
 .pill.closed{background:#E8F1EA;color:var(--closed);border:1px solid #C0D8C6}
+.pill.gap{background:#FDF4F3;color:var(--flag);border:1px solid #E7B3AE}
 .pill.stale{background:#FBEAE8;color:var(--flag);border:1px solid #E9BDB8}
 .sev{font-size:.72rem;font-weight:600;color:var(--muted)}
 .sev::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px;background:var(--muted)}
@@ -151,6 +152,8 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .field.invalid input,.field.invalid select,.field.invalid textarea{border-color:var(--flag);background:#FDF3F2}
 .field.invalid label{color:var(--flag)}
 .req-note{font-size:.75rem;color:var(--muted);margin:2px 0 10px}
+.gap-note{font-size:.84rem;color:var(--flag);background:#FDF4F3;border:1px solid #E7B3AE;border-radius:8px;padding:9px 12px;margin:0 0 12px}
+.gap-note b{font-weight:800}
 
 /* ---------- photos from the NCR form ---------- */
 .photos-block{margin:0 0 16px}
@@ -247,6 +250,8 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .rp-flag b{font-family:'IBM Plex Mono',monospace;font-size:.82rem}
 .rp-flag .why{color:#C1352C;font-weight:700;font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
 .rp-none{font-size:.87rem;color:#555;font-style:italic}
+.rp-gaps{font-size:.85rem;margin-top:10px;color:#111}
+.rp-gaps b{color:#C1352C}
 .rp-foot{margin-top:28px;padding-top:12px;border-top:1px solid #CBD5E1;font-size:.72rem;color:#666}
 
 /* one NCR per printed page */
@@ -269,6 +274,10 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
   font:inherit;font-size:.9rem;line-height:1.5;color:#111;resize:vertical;overflow:hidden}
 .meet-notes:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px rgba(31,56,100,.12)}
 .meet-notes::placeholder{color:#9AA5B4}
+.mn-row{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
+.mn-row .btn-report{padding:7px 14px;font-size:.82rem}
+.mn-msg{font-size:.8rem;color:var(--muted)}
+.mn-msg.err{color:var(--flag);font-weight:600}
 
 .rp-warn{max-width:820px;margin:16px auto -6px;background:#FDF4F3;border:1px solid #E7B3AE;
   border-left:3px solid var(--flag);border-radius:8px;padding:12px 16px;font-size:.86rem;color:var(--ink)}
@@ -293,6 +302,7 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
   .rp-case{page-break-inside:avoid}
   .rp-case+.rp-case{page-break-before:always;border-top:none;margin-top:0;padding-top:0}
   .meet-notes{resize:none;background:#fff;border-radius:0;box-shadow:none;border-color:#9AA5B4}
+  .mn-row{display:none}
   .meet-notes::placeholder{color:transparent}
   .rp-ext+.rp-ext{page-break-before:always;margin-top:0}
   .rp h2{page-break-after:avoid}
@@ -393,6 +403,16 @@ function daysSince(iso){
   return Math.floor((Date.now() - t.getTime()) / 86400000);
 }
 function isLive(r){ return r.status === "Open" || r.status === "In Progress"; }
+/* Closing needs all of these — the app refuses without them, and so does the
+   sheet now. Older NCRs were closed by hand in the sheet before that, so some
+   are missing a few; closedGaps() says which, so they can be finished off. */
+const CLOSE_NEEDS = [['sev','Severity'],['owner','Owner'],['target','Target complete date'],
+  ['root','Root cause'],['contain','Containment action'],['corrective','Corrective action'],
+  ['verified','Verified by'],['notes','Resolution notes']];
+function closedGaps(r){
+  if (!r || r.status !== 'Closed') return [];
+  return CLOSE_NEEDS.filter(f => String(r[f[0]] == null ? '' : r[f[0]]).trim() === '').map(f => f[1]);
+}
 function isStale(r){ return r.status === "Open" && daysSince(r.ts) > STALE_DAYS; }
 function isLate(r){
   if (r.status === 'Closed' || !r.target) return false;
@@ -742,10 +762,43 @@ function writeMeetingNote(ref, text){
 function growToFit(ta){ ta.style.height = 'auto'; ta.style.height = Math.max(84, ta.scrollHeight + 2) + 'px'; }
 function wireMeetingNotes(root){
   Array.prototype.forEach.call(root.querySelectorAll('.meet-notes'), ta => {
+    const btn = ta.parentNode.querySelector('.mn-save');
+    const sync = () => { if (btn) btn.disabled = !ta.value.trim(); };
     ta.value = readMeetingNote(ta.dataset.ref);
-    growToFit(ta);
-    ta.addEventListener('input', () => { writeMeetingNote(ta.dataset.ref, ta.value); growToFit(ta); });
+    growToFit(ta); sync();
+    ta.addEventListener('input', () => { writeMeetingNote(ta.dataset.ref, ta.value); growToFit(ta); sync(); });
+    if (btn) btn.addEventListener('click', () => saveMeetingNote(ta, btn));
   });
+}
+
+/* "Save to NCR": the note goes onto the end of the NCR's Resolution notes in
+   the register, dated, so it is there for everyone and not just this browser.
+   The box is then emptied — the note now lives on the NCR itself. */
+async function saveMeetingNote(ta, btn){
+  const ref = ta.dataset.ref, note = ta.value.trim();
+  const msg = btn.parentNode.querySelector('.mn-msg');
+  const r = DATA.rows.filter(x => x.ref === ref)[0];
+  if (!note || !r) return;
+  const stamp = 'Meeting ' + new Date().toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'});
+  const notes = (r.notes ? r.notes.replace(/\s+$/, '') + '\n\n' : '') + stamp + ': ' + note;
+  btn.disabled = true; msg.textContent = 'Saving\u2026'; msg.className = 'mn-msg';
+  try {
+    await postUpdates(r, { notes: notes });
+    r.notes = notes;
+    writeMeetingNote(ref, '');
+    /* redraw just this NCR so the note shows under Resolution notes */
+    const el = ta.closest('.rp-case');
+    const fresh = document.createElement('div');
+    fresh.innerHTML = caseHtml(r);
+    const drawn = fresh.firstChild;
+    el.parentNode.replaceChild(drawn, el);
+    wireMeetingNotes(drawn);
+    toast(ref + ' \u2014 note saved to the register');
+  } catch (err){
+    btn.disabled = false;
+    msg.textContent = 'Couldn\u2019t save: ' + err.message + ' \u2014 the note is kept here, try again';
+    msg.className = 'mn-msg err';
+  }
 }
 
 function reportHead(g, monthKey, title){
@@ -894,6 +947,8 @@ function summaryDoc(g, list, monthKey, all){
      even though they are not this month's work — someone owes an update. */
   const carried = (all || []).filter(r => monthKeyOf(r.ts) < monthKey && r.status !== 'Closed')
     .sort((a,b) => (a.ts < b.ts ? -1 : 1));
+  /* closed by hand in the sheet with fields still blank */
+  const incomplete = list.filter(r => closedGaps(r).length);
   const flags = [];
   list.filter(isLate).forEach(r => flags.push([r, daysLate(r) + ' days past target']));
   stale.forEach(r => { if (!isLate(r)) flags.push([r, daysSince(r.ts) + ' days, not actioned']); });
@@ -941,6 +996,11 @@ function summaryDoc(g, list, monthKey, all){
           '<td class="dt">' + daysSince(r.ts) + ' days</td>' +
           '<td>' + esc(String(r.what).slice(0, 150)) + '</td></tr>').join('') +
         '</tbody></table>'
+      : '') +
+    (incomplete.length
+      ? '<p class="rp-gaps"><b>Closed without every field filled in:</b> ' +
+          incomplete.map(r => esc(shortRef(r.ref)) + ' (' + esc(closedGaps(r).join(', ')) + ')').join('; ') +
+          '. These need finishing off in the app.</p>'
       : '') +
     (repeatCause.length || repeatCust.length
       ? '<p style="font-size:.85rem;margin-top:10px">' +
@@ -1066,12 +1126,16 @@ function casesDoc(g, list, monthKey){
       '<p class="rp-none" style="margin-top:24px">No NCRs were raised for ' + esc(g) +
       ' in ' + esc(monthLabelOf(monthKey)) + '.</p></div>';
   }
-  const row = (label, val) => val ? '<dt>' + label + '</dt><dd>' + esc(val) + '</dd>' : '';
   return '<div class="rp">' + reportHead(g, monthKey, 'NCR case pack') +
     '<p class="rp-sub" style="margin:10px 0 4px">' + list.length + ' NCR' + (list.length === 1 ? '' : 's') +
       ' &mdash; one per page</p>' +
-    list.map(r =>
-      '<div class="rp-case">' +
+    list.map(caseHtml).join('') +
+  '</div>';
+}
+
+function caseHtml(r){
+  const row = (label, val) => val ? '<dt>' + label + '</dt><dd>' + esc(val) + '</dd>' : '';
+  return '<div class="rp-case" data-ref="' + esc(r.ref) + '">' +
         '<div class="rp-case-top"><span class="r">' + esc(r.ref || '\u2014') + '</span>' +
           '<span class="s">' + esc(statusLabel(r.status) || 'No status') + '</span>' +
           (r.sev ? '<span class="s">' + esc(r.sev) + '</span>' : '') +
@@ -1097,9 +1161,10 @@ function casesDoc(g, list, monthKey){
         '</dl>' +
         '<div class="rp-notes"><label class="lbl" for="mn_' + esc(r.ref) + '">Discussed at the meeting</label>' +
           '<textarea class="meet-notes" id="mn_' + esc(r.ref) + '" data-ref="' + esc(r.ref) + '" rows="3" ' +
-            'placeholder="Type notes here as you go through it\u2026"></textarea></div>' +
-      '</div>').join('') +
-  '</div>';
+            'placeholder="Type notes here as you go through it\u2026"></textarea>' +
+          '<div class="mn-row"><button type="button" class="btn-report solid mn-save" data-ref="' + esc(r.ref) + '" disabled>' +
+            'Save to NCR</button><span class="mn-msg"></span></div></div>' +
+      '</div>';
 }
 
 function renderList(rs){
@@ -1150,7 +1215,9 @@ function card(r, withDept){
   const stale = isStale(r);
   const age = daysSince(r.ts);
   const nPics = photosOf(r).length;
-  const pill = r.status === 'Closed' ? '<span class="pill closed">Closed</span>'
+  const gaps = closedGaps(r);
+  const pill = gaps.length ? '<span class="pill gap" title="Closed without: ' + esc(gaps.join(', ')) + '">Closed &middot; incomplete</span>'
+             : r.status === 'Closed' ? '<span class="pill closed">Closed</span>'
              : r.status === 'In Progress' ? '<span class="pill prog">In progress</span>'
              : '<span class="pill open">Outstanding</span>';
   return '<button type="button" class="ncr' + (stale ? ' stale' : '') + '" data-ref="' + esc(r.ref) + '" style="text-align:left;width:100%">' +
@@ -1239,6 +1306,10 @@ function openDetail(r){
       '</dl>' +
       photoSection(r) +
       '<p class="req-note">Moving to In Progress needs a Severity and a target complete date. Closing needs every field below filled in.</p>' +
+      (closedGaps(r).length
+        ? '<p class="gap-note"><b>Closed without every field filled in.</b> Still missing: ' +
+          esc(closedGaps(r).join(', ')) + '. Fill them in and save to finish it properly.</p>'
+        : '') +
       '<div class="form-grid">' +
         '<div class="field"><label>Status</label>' + sel('status', ['Open','In Progress','Closed'], r.status) + '</div>' +
         '<div class="field" data-req><label>Severity</label>' + sel('sev', ['Critical','Major','Minor'], r.sev) + '</div>' +
@@ -1321,7 +1392,7 @@ function openDetail(r){
     const chosen = val('status');
     let needed = [];
     if (chosen === 'In Progress') needed = ['sev', 'target'];
-    if (chosen === 'Closed') needed = ['sev','owner','target','root','contain','corrective','verified','notes'];
+    if (chosen === 'Closed') needed = CLOSE_NEEDS.map(f => f[0]);
     const missing = needed.filter(k => val(k) === '');
     if (missing.length){
       missing.forEach(k => { const el = ov.querySelector('#f_' + k); if (el) el.closest('.field').classList.add('invalid'); });
@@ -1340,9 +1411,7 @@ function openDetail(r){
 
     btn.disabled = true; msg.textContent = 'Saving\u2026'; msg.className = 'save-msg';
     try {
-      const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, updates }) });
-      const out = await res.json();
-      if (!out.ok) throw new Error(out.error || 'Save failed');
+      await postUpdates(r, updates);
       clearDraft(r.ref);
       close();
       toast(r.ref + ' saved to the register');
@@ -1354,6 +1423,14 @@ function openDetail(r){
       msg.className = 'save-msg err';
     }
   });
+}
+
+/* Every write to the register goes through here. */
+async function postUpdates(r, updates){
+  const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, updates }) });
+  const out = await res.json();
+  if (!out.ok) throw new Error(out.error || 'Save failed');
+  return out;
 }
 
 /* ---------------- photos from the NCR form (register column L) ---------------- */
