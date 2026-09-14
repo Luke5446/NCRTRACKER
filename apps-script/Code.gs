@@ -460,3 +460,63 @@ function doPost(e) {
     lock.releaseLock();
   }
 }
+
+
+// ===== Closing an NCR by hand in the sheet (added Sep 2026) =====
+// The app will not close an NCR until every one of these is filled in, but
+// the sheet itself would let anyone pick "Closed" from the dropdown. This runs
+// on every hand edit to the register: if Status is set to Closed on a row that
+// is still missing any of them, the previous status is put back and a note on
+// the cell says what is missing. Saves made from the app come in through
+// doPost and are checked there, not here.
+// Nothing to install — a function called onEdit runs on its own.
+const CLOSE_NEEDS = ['Severity', 'Owner', 'Root Cause', 'Containment Action',
+  'Corrective Action', 'Target Complete Date', 'Verified by', 'Resolution notes'];
+
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== DASH_SHEET_NAME) return;
+
+    const lastCol = sheet.getLastColumn();
+    let headerRow = 1;
+    const top = sheet.getRange(1, 1, Math.min(5, sheet.getLastRow()), lastCol).getValues();
+    for (var h = 0; h < top.length; h++) {
+      if (top[h].map(String).indexOf('Timestamp') > -1) { headerRow = h + 1; break; }
+    }
+    const headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0]
+      .map(function(x){ return String(x).trim(); });
+    const statusCol = headers.indexOf('Status') + 1;
+    if (!statusCol) return;
+
+    // only edits that touch the Status column matter
+    const c1 = e.range.getColumn(), c2 = c1 + e.range.getNumColumns() - 1;
+    if (statusCol < c1 || statusCol > c2) return;
+
+    const r1 = e.range.getRow(), n = e.range.getNumRows();
+    const single = n === 1 && e.range.getNumColumns() === 1;
+    for (var i = 0; i < n; i++) {
+      const row = r1 + i;
+      if (row <= headerRow) continue;
+      const cell = sheet.getRange(row, statusCol);
+      if (String(cell.getValue()).trim() !== 'Closed') continue;
+
+      const blank = function(name){
+        const c = headers.indexOf(name) + 1;
+        return !c || String(sheet.getRange(row, c).getValue()).trim() === '';
+      };
+      const missing = CLOSE_NEEDS.filter(blank);
+      if (!missing.length) { cell.clearNote(); continue; }
+
+      // put back what it was; for a pasted block there is no "was", so make a sensible guess
+      let back = single && e.oldValue !== undefined && e.oldValue !== null ? String(e.oldValue) : '';
+      if (!back || back === 'Closed') back = (!blank('Severity') && !blank('Target Complete Date')) ? 'In Progress' : 'Open';
+      cell.setValue(back);
+      cell.setNote('Not closed \u2014 still needs: ' + missing.join(', ') + '.\n' +
+        'An NCR can only be closed once every one of these is filled in, the same as in the app.');
+    }
+  } catch (err) {
+    // never get in the way of someone editing the sheet
+  }
+}
