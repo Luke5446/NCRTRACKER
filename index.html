@@ -263,8 +263,12 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .rp-grid dd{margin:0;white-space:pre-line}
 .rp-notes{margin-top:14px}
 .rp-notes .lbl{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#555}
-.rp-notes .lines{margin-top:5px}
-.rp-notes .lines i{display:block;border-bottom:1px solid #C9D3DF;height:20px}
+/* typed into during the meeting; grows with what is written and prints as written */
+.meet-notes{display:block;width:100%;box-sizing:border-box;margin-top:6px;min-height:84px;
+  padding:9px 11px;border:1px solid #C9D3DF;border-radius:6px;background:#FCFDFE;
+  font:inherit;font-size:.9rem;line-height:1.5;color:#111;resize:vertical;overflow:hidden}
+.meet-notes:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px rgba(31,56,100,.12)}
+.meet-notes::placeholder{color:#9AA5B4}
 
 .rp-warn{max-width:820px;margin:16px auto -6px;background:#FDF4F3;border:1px solid #E7B3AE;
   border-left:3px solid var(--flag);border-radius:8px;padding:12px 16px;font-size:.86rem;color:var(--ink)}
@@ -288,6 +292,8 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
   .rp{max-width:none;margin:0;padding:0;box-shadow:none}
   .rp-case{page-break-inside:avoid}
   .rp-case+.rp-case{page-break-before:always;border-top:none;margin-top:0;padding-top:0}
+  .meet-notes{resize:none;background:#fff;border-radius:0;box-shadow:none;border-color:#9AA5B4}
+  .meet-notes::placeholder{color:transparent}
   .rp-ext+.rp-ext{page-break-before:always;margin-top:0}
   .rp h2{page-break-after:avoid}
   tr{page-break-inside:avoid}
@@ -677,7 +683,7 @@ function meetingBar(rs, g){
           esc(monthLabelOf(k)) + '</option>').join('') +
       '</select>' +
       '<button class="btn-report solid" type="button" id="btnSummary">Monthly summary</button>' +
-      '<button class="btn-report" type="button" id="btnCases">Print each NCR</button>' +
+      '<button class="btn-report" type="button" id="btnCases">All NCRs</button>' +
       (EXTERNAL_DEPTS.indexOf(g) > -1
         ? '<button class="btn-report" type="button" id="btnSuppliers">Report per company</button>' : '') +
     '</div>';
@@ -692,7 +698,7 @@ function wireMeetingBar(g, rs){
   document.getElementById('btnSummary').addEventListener('click', () =>
     openReport('Monthly summary', summaryDoc(g, forMonth(), view.month, rs)));
   document.getElementById('btnCases').addEventListener('click', () =>
-    openReport('NCR case pack', casesDoc(g, forMonth(), view.month)));
+    openReport('All NCRs', casesDoc(g, forMonth(), view.month)));
   const sup = document.getElementById('btnSuppliers');
   if (sup) sup.addEventListener('click', () =>
     openReport('Report per company', supplierDoc(g, forMonth(), view.month), true));
@@ -715,11 +721,31 @@ function openReport(title, docHtml, outgoing){
       : '') + docHtml;
   document.body.appendChild(v);
   window.scrollTo(0, 0);
+  wireMeetingNotes(v);
   const shut = () => { v.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = e => { if (e.key === 'Escape') shut(); };
   v.querySelector('#rpBack').addEventListener('click', shut);
   v.querySelector('#rpPrint').addEventListener('click', () => window.print());
   document.addEventListener('keydown', onKey);
+}
+
+/* Notes typed against an NCR during the meeting. They live in this browser,
+   keyed by ref, so closing the report or losing the connection does not lose
+   them, and the same NCR shows the same notes next month. Nothing is written
+   back to the register. */
+function meetingKey(ref){ return 'ncr-meeting-' + ref; }
+function readMeetingNote(ref){ try { return localStorage.getItem(meetingKey(ref)) || ''; } catch (err){ return ''; } }
+function writeMeetingNote(ref, text){
+  try { text ? localStorage.setItem(meetingKey(ref), text) : localStorage.removeItem(meetingKey(ref)); }
+  catch (err){ /* still typeable and printable, just not kept */ }
+}
+function growToFit(ta){ ta.style.height = 'auto'; ta.style.height = Math.max(84, ta.scrollHeight + 2) + 'px'; }
+function wireMeetingNotes(root){
+  Array.prototype.forEach.call(root.querySelectorAll('.meet-notes'), ta => {
+    ta.value = readMeetingNote(ta.dataset.ref);
+    growToFit(ta);
+    ta.addEventListener('input', () => { writeMeetingNote(ta.dataset.ref, ta.value); growToFit(ta); });
+  });
 }
 
 function reportHead(g, monthKey, title){
@@ -1069,8 +1095,9 @@ function casesDoc(g, list, monthKey){
           row('Resolution notes', r.notes) +
           row('Photos', photosOf(r).length ? photosOf(r).length + ' attached \u2014 see the app' : '') +
         '</dl>' +
-        '<div class="rp-notes"><span class="lbl">Discussed at the meeting</span>' +
-          '<div class="lines"><i></i><i></i><i></i></div></div>' +
+        '<div class="rp-notes"><label class="lbl" for="mn_' + esc(r.ref) + '">Discussed at the meeting</label>' +
+          '<textarea class="meet-notes" id="mn_' + esc(r.ref) + '" data-ref="' + esc(r.ref) + '" rows="3" ' +
+            'placeholder="Type notes here as you go through it\u2026"></textarea></div>' +
       '</div>').join('') +
   '</div>';
 }
