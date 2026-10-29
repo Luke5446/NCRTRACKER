@@ -102,6 +102,18 @@ What happens in the register:
   (one line per move: when, from → to, by whom, why). No existing column is moved.
 - Changing column C by hand in the sheet is logged the same way by `onEdit`.
 
+Second pass, same day:
+
+- Only an open NCR (Outstanding or In Progress) can be moved. A closed one must be
+  reopened in the app first.
+- The manager moving it picks the **Issue category** again.
+- The investigation is cleared for the new department to fill in from scratch:
+  Severity, Target Complete Date, Root Cause, Containment Action, Corrective Action,
+  Verified by, Resolution notes. Status goes back to Open. What was cleared is kept,
+  field by field, on the Reassignment history line, so nothing is lost.
+- The app's front page gained a month-by-month table of last year against this year
+  (January to December each, this year to date).
+
 The app shows *Moved from Sales* on the card and in the NCR window, and the monthly
 reports list the move under each NCR.
 
