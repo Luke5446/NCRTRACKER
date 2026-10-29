@@ -81,6 +81,35 @@ Action, Corrective Action, Target Complete Date, Verified by, Resolution notes.
 The app now also points out the older NCRs that were closed with gaps — on the card,
 in the NCR window, and on the monthly summary — so they can be finished off.
 
+## October 2026: moving an NCR to another department
+
+An NCR raised against the wrong department (NCR-2026-406 was raised against Sales but
+was a Stores error) can now be moved. In the app, open the NCR and tap **Wrong
+department? Move it** at the bottom: choose the department, give your name and a
+reason, and confirm.
+
+What happens in the register:
+
+- **Department (column C)** is changed to the new department. Because the row itself
+  moves, every count — the Dashboard tab, Monthly by Dept, and the app's department and
+  monthly figures — shows it once, under the new department. The old department no
+  longer counts it.
+- Everything else on the row stays as it is, so any root cause, containment, corrective
+  action or notes already written come with it. **Owner** becomes the new department's
+  manager.
+- Two new columns are added at the right-hand end (after *Notified*, column AA) the first
+  time an NCR is moved: **Original department** (set once) and **Reassignment history**
+  (one line per move: when, from → to, by whom, why). No existing column is moved.
+- Changing column C by hand in the sheet is logged the same way by `onEdit`.
+
+The app shows *Moved from Sales* on the card and in the NCR window, and the monthly
+reports list the move under each NCR.
+
+**To apply it:** open `Code.gs`, select all, delete, paste in the whole of `Code.gs` from
+this folder, **Save**, then **Deploy ▸ Manage deployments ▸ ✏️ ▸ Version: New version ▸
+Deploy**. This one does need the redeploy, because `doGet` and `doPost` changed. No new
+permissions are asked for.
+
 ## Notes
 
 - **Nothing in Drive gets re-shared.** The script runs as the sheet owner and hands the
