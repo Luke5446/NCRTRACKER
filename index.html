@@ -195,6 +195,17 @@ footer{max-width:1060px;margin:0 auto;padding:0 18px 30px;font-size:.72rem;color
 .draft-note{background:#FBF0E2;border:1px solid #EBCDA5;border-radius:7px;padding:9px 12px;
   margin-top:14px;font-size:.82rem;color:#7A4A12;line-height:1.5}
 .draft-note button{font-size:.82rem;font-weight:700;color:#7A4A12;text-decoration:underline}
+/* ---------- moving an NCR to another department ---------- */
+.moved-note{font-size:.84rem;color:var(--ink);background:var(--tagbg);border:1px solid var(--line);border-left:3px solid var(--sky);border-radius:8px;padding:9px 12px;margin:0 0 12px;white-space:pre-line}
+.moved-note b{font-weight:800}
+.reassign-link{font-size:.8rem;font-weight:700;color:var(--chambray);text-decoration:underline;margin-right:auto}
+.reassign{background:#FBF0E2;border:1px solid #EBCDA5;border-radius:8px;padding:12px 14px;margin-top:14px}
+.reassign h3{margin:0 0 4px;font-size:.95rem;color:var(--ink)}
+.reassign p{font-size:.8rem;color:var(--muted);margin:0 0 10px;line-height:1.4}
+.reassign .form-grid{margin-bottom:10px}
+.reassign .actions{display:flex;gap:10px;justify-content:flex-end;align-items:center}
+.reassign .actions .save-msg{margin-right:auto}
+.pill.moved{background:var(--tagbg);color:var(--ink);border:1px solid var(--line)}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:.85rem;font-weight:600;padding:11px 18px;border-radius:8px;box-shadow:0 8px 24px rgba(30,42,58,.35);z-index:60}
 @media (max-width:560px){ .form-grid{grid-template-columns:1fr} }
 
@@ -352,6 +363,13 @@ const APP_KEY = "tibard-ncr-2026";   // must match APP_KEY in the Apps Script
 const STALE_DAYS = 7;                    // flag if still "Open" after this many days
 const REPORT_CONTACT = "NCR@tibard.co.uk";   // shown on reports that go outside the company
 const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
+/* Oct 2026: a manager can move an NCR to another department (Reassign, in the
+   NCR window). The register row itself moves, so it counts once, under the new
+   department, and the investigation already written stays with it. */
+/* The departments an NCR can be raised against — the same list as column C of
+   the register and DEPTS in the Apps Script. */
+const DEPTS = ['Sales', 'Production', 'IT & Digital', 'Stores', 'Accounts', 'Suppliers', 'Procurement',
+               'EMB', 'Logistics', 'DPD', 'H&B', 'ISO/QC', 'Other'];
 /* A department can be owned by more than one person — list them in an array. */
 const OWNERS = {
   "Sales":"Duncan", "Suppliers":"Duncan", "IT & Digital":"Ben",
@@ -590,7 +608,7 @@ function renderMainBody(){
 function renderSearch(wrap, term){
   const t = term.toLowerCase();
   const hit = v => String(v || '').toLowerCase().includes(t);
-  const list = DATA.rows.filter(r => hit(r.ref) || hit(r.order) || hit(r.cust) || hit(r.dept) || hit(r.what));
+  const list = DATA.rows.filter(r => hit(r.ref) || hit(r.order) || hit(r.cust) || hit(r.dept) || hit(r.origDept) || hit(r.what));
 
   /* a matching NCR number is almost always what was wanted, so float those up */
   list.sort((a,b) => {
@@ -1157,6 +1175,7 @@ function caseHtml(r){
           row('Target complete', r.target ? fmtDate(r.target) : '') +
           row('Verified by', r.verified) +
           row('Resolution notes', r.notes) +
+          row('Moved', r.reassigned) +
           row('Photos', photosOf(r).length ? photosOf(r).length + ' attached \u2014 see the app' : '') +
         '</dl>' +
         '<div class="rp-notes"><label class="lbl" for="mn_' + esc(r.ref) + '">Discussed at the meeting</label>' +
@@ -1227,6 +1246,7 @@ function card(r, withDept){
       '<div class="ncr-meta">' +
         '<span>' + fmtDate(r.ts) + ' &middot; ' + age + 'd old</span>' +
         (withDept && r.dept ? '<span class="dept-tag">' + esc(groupDept(r.dept)) + '</span>' : '') +
+        (r.origDept ? '<span class="pill moved" title="' + esc(r.reassigned) + '">Moved from ' + esc(groupDept(r.origDept)) + '</span>' : '') +
         (r.order ? '<span>Order ' + esc(r.order) + '</span>' : '') +
         (r.cust ? '<span>' + esc(r.cust) + '</span>' : '') +
         (r.sev ? '<span class="sev ' + esc(r.sev) + '">' + esc(r.sev) + '</span>' : '') +
@@ -1305,6 +1325,9 @@ function openDetail(r){
         (r.immediate ? '<dt>Immediate action taken</dt><dd>' + esc(r.immediate) + '</dd>' : '') +
       '</dl>' +
       photoSection(r) +
+      (r.origDept
+        ? '<div class="moved-note"><b>Moved from ' + esc(r.origDept) + '.</b> ' + esc(r.reassigned) + '</div>'
+        : '') +
       '<p class="req-note">Moving to In Progress needs a Severity and a target complete date. Closing needs every field below filled in.</p>' +
       (closedGaps(r).length
         ? '<p class="gap-note"><b>Closed without every field filled in.</b> Still missing: ' +
@@ -1323,12 +1346,15 @@ function openDetail(r){
       '</div>' +
       '<div class="draft-note" id="draftNote" hidden></div>' +
       '<div class="panel-actions">' +
+        '<button type="button" class="reassign-link" id="reassignLink">Wrong department? Move it</button>' +
         '<span class="save-msg" id="saveMsg"></span>' +
         '<button class="btn btn-cancel" type="button">Close</button>' +
         '<button class="btn btn-save" type="button" id="saveBtn">Save to register</button>' +
       '</div>' +
+      reassignBlock(r) +
     '</div>';
   document.body.appendChild(ov);
+  wireReassign(ov, r, () => changed(), () => close());
   const original = {
     status: r.status || '', sev: r.sev || '', owner: r.owner || '', target: targetVal,
     root: r.root || '', contain: r.contain || '', corrective: r.corrective || '',
@@ -1421,6 +1447,76 @@ function openDetail(r){
       writeDraft(r.ref, panelValues(ov));
       msg.textContent = 'Couldn\u2019t save: ' + err.message + ' \u2014 your notes are kept, try again';
       msg.className = 'save-msg err';
+    }
+  });
+}
+
+/* ---------------- moving an NCR to another department ----------------
+   For an NCR raised against the wrong department. The register row itself is
+   moved (column C), so the NCR counts once, under the new department, in every
+   figure on here and on the sheet, and whatever investigation has already been
+   written stays with it. The register keeps where it came from, and who moved
+   it, when and why. Owner becomes the new department's manager. */
+function reassignBlock(r){
+  const cur = String(r.dept || '').trim();
+  const opts = DEPTS.filter(d => d !== cur);
+  return '<div class="reassign" id="reassign" hidden>' +
+      '<h3>Move ' + esc(r.ref) + ' to another department</h3>' +
+      '<p>It is currently against <b>' + esc(cur || 'no department') + '</b>. Everything written on it so far ' +
+        'comes with it, and it will no longer count against ' + esc(cur || 'that department') + '.</p>' +
+      '<div class="form-grid">' +
+        '<div class="field"><label>Move to</label><select id="ra_to"><option value="">Choose&hellip;</option>' +
+          opts.map(d => '<option value="' + esc(d) + '">' + esc(d) + (ownerText(groupDept(d)) ? ' (' + esc(ownerText(groupDept(d))) + ')' : '') + '</option>').join('') +
+        '</select></div>' +
+        '<div class="field"><label>Your name</label><input type="text" id="ra_by" value="' + esc(readWho()) + '" placeholder="Who is moving it"></div>' +
+        '<div class="field wide"><label>Why</label><input type="text" id="ra_why" placeholder="e.g. Not a sales error \u2014 picked wrong in stores"></div>' +
+      '</div>' +
+      '<div class="actions"><span class="save-msg" id="raMsg"></span>' +
+        '<button class="btn btn-cancel" type="button" id="raCancel">Cancel</button>' +
+        '<button class="btn btn-save" type="button" id="raGo">Move NCR</button></div>' +
+    '</div>';
+}
+function readWho(){ try { return localStorage.getItem('ncr-who') || ''; } catch (err){ return ''; } }
+function writeWho(v){ try { localStorage.setItem('ncr-who', v); } catch (err){} }
+
+function wireReassign(ov, r, hasUnsaved, closePanel){
+  const link = ov.querySelector('#reassignLink'), box = ov.querySelector('#reassign');
+  if (!link || !box) return;
+  const msg = box.querySelector('#raMsg');
+  link.addEventListener('click', () => {
+    box.hidden = !box.hidden;
+    if (!box.hidden){ box.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); box.querySelector('#ra_to').focus(); }
+  });
+  box.querySelector('#raCancel').addEventListener('click', () => { box.hidden = true; });
+  box.querySelector('#raGo').addEventListener('click', async () => {
+    const to = box.querySelector('#ra_to').value, by = box.querySelector('#ra_by').value.trim(),
+          why = box.querySelector('#ra_why').value.trim();
+    box.querySelectorAll('.field.invalid').forEach(f => f.classList.remove('invalid'));
+    const bad = [];
+    if (!to) bad.push('ra_to'); if (!by) bad.push('ra_by'); if (!why) bad.push('ra_why');
+    if (bad.length){
+      bad.forEach(id => box.querySelector('#' + id).closest('.field').classList.add('invalid'));
+      msg.textContent = 'Choose a department, and say who is moving it and why'; msg.className = 'save-msg err';
+      return;
+    }
+    if (hasUnsaved() && !window.confirm('You have changes above that haven\u2019t been saved to the register.\n\n' +
+        'Move the NCR anyway? Those changes stay on this device and will be waiting when you reopen it under ' + to + '.')) return;
+    if (!window.confirm('Move ' + r.ref + ' from ' + (r.dept || 'no department') + ' to ' + to + '?\n\n' +
+        'It will count under ' + to + ' from now on, and ' + (ownerText(groupDept(to)) || 'that department') + ' will own it.')) return;
+    writeWho(by);
+    const go = box.querySelector('#raGo');
+    go.disabled = true; msg.textContent = 'Moving\u2026'; msg.className = 'save-msg';
+    try {
+      const res = await fetch(API_URL, { method: 'POST',
+        body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, action: 'reassign', to: to, by: by, reason: why }) });
+      const out = await res.json();
+      if (!out.ok) throw new Error(out.error || 'Move failed');
+      closePanel();
+      toast(r.ref + ' moved to ' + to);
+      await load();      /* it drops out of this department's list and appears under the new one */
+    } catch (err){
+      go.disabled = false;
+      msg.textContent = 'Couldn\u2019t move it: ' + err.message; msg.className = 'save-msg err';
     }
   });
 }

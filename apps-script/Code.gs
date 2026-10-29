@@ -312,7 +312,8 @@ function doGet(e) {
     corrective: col('Corrective Action'), verified: col('Verified by'),
     notes: col('Resolution notes'),
     target: col('Target Complete Date'), closedDate: col('Date closed'),
-    ref: col('NCR ref')
+    ref: col('NCR ref'),
+    origDept: col(REASSIGN_FROM_HEADER), reassigned: col(REASSIGN_LOG_HEADER)   // see "Reassigning an NCR" below
   };
 
   const rows = [];
@@ -344,7 +345,9 @@ function doGet(e) {
       verified: String(r[c.verified] || ''),
       notes: String(r[c.notes] || ''),
       target: r[c.target] instanceof Date ? r[c.target].toISOString() : String(r[c.target] || ''),
-      closed: r[c.closedDate] instanceof Date ? r[c.closedDate].toISOString() : String(r[c.closedDate] || '')
+      closed: r[c.closedDate] instanceof Date ? r[c.closedDate].toISOString() : String(r[c.closedDate] || ''),
+      origDept: c.origDept > -1 ? String(r[c.origDept] || '') : '',        // department it was first raised against
+      reassigned: c.reassigned > -1 ? String(r[c.reassigned] || '') : ''   // who moved it, when and why
     });
   }
 
@@ -401,6 +404,9 @@ function doPost(e) {
       }
     }
     if (!row) return jsonOut_({ ok: false, error: 'NCR ' + refWanted + ' not found in the register' });
+
+    // Moving the NCR to another department — see "Reassigning an NCR" below
+    if (req.action === 'reassign') return reassignNcr_(sheet, headers, row, refWanted, req);
 
     // Only these fields can be written from the app
     const FIELD_HEADERS = {
@@ -487,6 +493,19 @@ function onEdit(e) {
     }
     const headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0]
       .map(function(x){ return String(x).trim(); });
+    // Department changed by hand in the sheet: keep the same record a move from
+    // the app would, so the NCR still says where it came from.
+    const deptCol = headers.indexOf('Department') + 1;
+    if (deptCol && e.range.getNumRows() === 1 && e.range.getNumColumns() === 1 &&
+        e.range.getColumn() === deptCol && e.range.getRow() > headerRow &&
+        e.oldValue !== undefined && e.oldValue !== null) {
+      const from = String(e.oldValue).trim(), to = String(e.value || '').trim();
+      if (from && to && from !== to) {
+        const who = (e.user && e.user.getEmail && e.user.getEmail()) || 'edited in the sheet';
+        noteReassignment_(sheet, headers, e.range.getRow(), from, to, who, 'changed in the sheet');
+      }
+    }
+
     const statusCol = headers.indexOf('Status') + 1;
     if (!statusCol) return;
 
@@ -519,4 +538,85 @@ function onEdit(e) {
   } catch (err) {
     // never get in the way of someone editing the sheet
   }
+}
+
+
+// ===== Reassigning an NCR to another department (added Oct 2026) =====
+// A manager can move an NCR that was raised against the wrong department.
+// The row itself moves: Department (column C) becomes the new department, so
+// every count — the Dashboard tab, Monthly by Dept, and the app's department
+// and monthly figures — picks it up under the new department and drops it from
+// the old one. Nothing else on the row is touched, so any investigation
+// already written (root cause, containment, corrective action, notes) comes
+// with it. Owner is set to the new department's manager.
+//
+// Two columns are added on the right of the register the first time a move
+// happens (after Notified, column AA). Existing columns are never moved:
+//   "Original department"  — the department it was first raised against, set once
+//   "Reassignment history" — one line per move: when, from → to, by whom, why
+// After pasting: Deploy > Manage deployments > pencil > Version: New version > Deploy
+const REASSIGN_FROM_HEADER = 'Original department';
+const REASSIGN_LOG_HEADER  = 'Reassignment history';
+
+function reassignNcr_(sheet, headers, row, ref, req) {
+  const to = String(req.to || '').trim();
+  const by = String(req.by || '').trim();
+  const reason = String(req.reason || '').trim();
+  if (DEPTS.indexOf(to) === -1) return jsonOut_({ ok: false, error: 'Unknown department: ' + to });
+  if (!by) return jsonOut_({ ok: false, error: 'Say who is moving it' });
+  if (!reason) return jsonOut_({ ok: false, error: 'Give a reason for the move' });
+
+  const deptCol = headers.indexOf('Department') + 1;
+  if (!deptCol) return jsonOut_({ ok: false, error: 'Department column not found' });
+  const from = String(sheet.getRange(row, deptCol).getValue()).trim();
+  if (from === to) return jsonOut_({ ok: false, error: ref + ' is already against ' + to });
+
+  sheet.getRange(row, deptCol).setValue(to);
+  noteReassignment_(sheet, headers, row, from, to, by, reason);
+
+  // Owner follows the department
+  const ownerCol = headers.indexOf('Owner') + 1;
+  let owner = '';
+  if (ownerCol && NCR_OWNERS[to]) {
+    owner = NCR_OWNERS[to];
+    sheet.getRange(row, ownerCol).setValue(owner);
+  }
+  return jsonOut_({ ok: true, ref: ref, row: row, from: from, to: to, owner: owner });
+}
+
+// Writes the record of a move. Adds the two columns if the register does not
+// have them yet. headers is the header row as read by the caller; a column
+// added here is appended after the last one.
+function noteReassignment_(sheet, headers, row, from, to, by, reason) {
+  const fromCol = ensureColumn_(sheet, headers, REASSIGN_FROM_HEADER);
+  const logCol  = ensureColumn_(sheet, headers, REASSIGN_LOG_HEADER);
+
+  const origCell = sheet.getRange(row, fromCol);
+  if (String(origCell.getValue()).trim() === '') origCell.setValue(from);
+
+  const when = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'd MMM yyyy HH:mm');
+  const line = when + ' \u2014 ' + from + ' \u2192 ' + to + ' by ' + by + ': ' + reason;
+  const logCell = sheet.getRange(row, logCol);
+  const existing = String(logCell.getValue()).trim();
+  logCell.setValue(existing ? existing + '\n' + line : line)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP).setVerticalAlignment('top');
+}
+
+// Column number of a header, adding it at the right-hand end if it is missing.
+function ensureColumn_(sheet, headers, name) {
+  const idx = headers.indexOf(name);
+  if (idx > -1) return idx + 1;
+  const lastCol = sheet.getLastColumn();
+  sheet.getRange(findHeaderRow_(sheet), lastCol + 1).setValue(name).setFontWeight('bold');
+  headers.push(name);               // so a second call in the same request sees it
+  return lastCol + 1;
+}
+
+function findHeaderRow_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  const top = sheet.getRange(1, 1, Math.min(5, sheet.getLastRow()), lastCol).getValues();
+  for (var h = 0; h < top.length; h++) {
+    if (top[h].map(String).indexOf('Timestamp') > -1) return h + 1;
+  }
+  return 1;
 }
