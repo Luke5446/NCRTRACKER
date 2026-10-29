@@ -546,7 +546,8 @@ function onEdit(e) {
 // The row itself moves: Department (column C) becomes the new department, so
 // every count — the Dashboard tab, Monthly by Dept, and the app's department
 // and monthly figures — picks it up under the new department and drops it from
-// the old one. The manager moving it picks the Issue category again. The
+// the old one. The manager moving it picks the Issue category again and can
+// reword "What happened?" (the original wording is kept in the history). The
 // investigation written so far (Severity, Target date, Root cause, Containment,
 // Corrective action, Verified by, Resolution notes) is cleared so the new
 // department's manager fills it in afresh; what was there is kept in the
@@ -594,7 +595,18 @@ function reassignNcr_(sheet, headers, row, ref, req) {
     if (text) kept.push(name + ': ' + text);
     cell.clearContent();
   });
-  const detail = reason + (kept.length ? ' | Cleared on move (' + from + '): ' + kept.join(' | ') : '');
+  // the description can be reworded as part of the move, so it says what the
+  // new department is actually being asked to look at; the original is kept
+  const whatCol = colOf('What happened?');
+  const what = String(req.what || '').trim();
+  let wasWhat = '';
+  if (whatCol && what) {
+    wasWhat = String(sheet.getRange(row, whatCol).getValue()).trim();
+    if (wasWhat !== what) sheet.getRange(row, whatCol).setValue(what); else wasWhat = '';
+  }
+  const detail = reason +
+    (wasWhat ? ' | What happened? was: ' + wasWhat : '') +
+    (kept.length ? ' | Cleared on move (' + from + '): ' + kept.join(' | ') : '');
 
   sheet.getRange(row, deptCol).setValue(to);
   const catCol = colOf('Issue category');
