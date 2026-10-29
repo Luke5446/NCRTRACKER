@@ -542,43 +542,71 @@ function onEdit(e) {
 
 
 // ===== Reassigning an NCR to another department (added Oct 2026) =====
-// A manager can move an NCR that was raised against the wrong department.
+// A manager can move an open NCR that was raised against the wrong department.
 // The row itself moves: Department (column C) becomes the new department, so
 // every count — the Dashboard tab, Monthly by Dept, and the app's department
 // and monthly figures — picks it up under the new department and drops it from
-// the old one. Nothing else on the row is touched, so any investigation
-// already written (root cause, containment, corrective action, notes) comes
-// with it. Owner is set to the new department's manager.
+// the old one. The manager moving it picks the Issue category again. The
+// investigation written so far (Severity, Target date, Root cause, Containment,
+// Corrective action, Verified by, Resolution notes) is cleared so the new
+// department's manager fills it in afresh; what was there is kept in the
+// Reassignment history line. Status goes back to Open and Owner becomes the new
+// department's manager. A Closed NCR cannot be moved — reopen it first.
 //
 // Two columns are added on the right of the register the first time a move
 // happens (after Notified, column AA). Existing columns are never moved:
 //   "Original department"  — the department it was first raised against, set once
-//   "Reassignment history" — one line per move: when, from → to, by whom, why
+//   "Reassignment history" — one line per move: when, from → to, by whom, why,
+//                             plus the investigation that was cleared
 // After pasting: Deploy > Manage deployments > pencil > Version: New version > Deploy
 const REASSIGN_FROM_HEADER = 'Original department';
 const REASSIGN_LOG_HEADER  = 'Reassignment history';
+const REASSIGN_CLEARS = ['Severity', 'Target Complete Date', 'Root Cause', 'Containment Action',
+  'Corrective Action', 'Verified by', 'Resolution notes', 'Date closed'];
 
 function reassignNcr_(sheet, headers, row, ref, req) {
   const to = String(req.to || '').trim();
   const by = String(req.by || '').trim();
   const reason = String(req.reason || '').trim();
+  const cat = String(req.cat || '').trim();
   if (DEPTS.indexOf(to) === -1) return jsonOut_({ ok: false, error: 'Unknown department: ' + to });
+  if (!cat) return jsonOut_({ ok: false, error: 'Pick an issue category' });
   if (!by) return jsonOut_({ ok: false, error: 'Say who is moving it' });
   if (!reason) return jsonOut_({ ok: false, error: 'Give a reason for the move' });
 
-  const deptCol = headers.indexOf('Department') + 1;
+  const colOf = function(name){ return headers.indexOf(name) + 1; };
+  const deptCol = colOf('Department');
   if (!deptCol) return jsonOut_({ ok: false, error: 'Department column not found' });
   const from = String(sheet.getRange(row, deptCol).getValue()).trim();
   if (from === to) return jsonOut_({ ok: false, error: ref + ' is already against ' + to });
 
+  const statusCol = colOf('Status');
+  const status = statusCol ? String(sheet.getRange(row, statusCol).getValue()).trim() : '';
+  if (status === 'Closed') return jsonOut_({ ok: false, error: ref + ' is closed. Reopen it (set Status to Outstanding and save), then move it.' });
+
+  // keep what the old department wrote, then clear it for the new one
+  const kept = [];
+  REASSIGN_CLEARS.forEach(function(name){
+    const c = colOf(name); if (!c) return;
+    const cell = sheet.getRange(row, c);
+    const v = cell.getValue();
+    const text = v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'd MMM yyyy') : String(v == null ? '' : v).trim();
+    if (text) kept.push(name + ': ' + text);
+    cell.clearContent();
+  });
+  const detail = reason + (kept.length ? ' | Cleared on move (' + from + '): ' + kept.join(' | ') : '');
+
   sheet.getRange(row, deptCol).setValue(to);
-  noteReassignment_(sheet, headers, row, from, to, by, reason);
+  const catCol = colOf('Issue category');
+  if (catCol) sheet.getRange(row, catCol).setValue(cat);
+  if (statusCol) sheet.getRange(row, statusCol).setValue('Open');
+  noteReassignment_(sheet, headers, row, from, to, by, detail);
 
   // Owner follows the department
-  const ownerCol = headers.indexOf('Owner') + 1;
+  const ownerCol = colOf('Owner');
   let owner = '';
-  if (ownerCol && NCR_OWNERS[to]) {
-    owner = NCR_OWNERS[to];
+  if (ownerCol) {
+    owner = NCR_OWNERS[to] || '';
     sheet.getRange(row, ownerCol).setValue(owner);
   }
   return jsonOut_({ ok: true, ref: ref, row: row, from: from, to: to, owner: owner });

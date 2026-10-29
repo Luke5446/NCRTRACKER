@@ -88,6 +88,11 @@ main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
 .breakdown td:last-child,.breakdown th:last-child{text-align:right;font-variant-numeric:tabular-nums}
 .breakdown tr.total td{font-weight:800;border-bottom:none;border-top:2px solid var(--ink)}
 .breakdown .none{font-size:.88rem;color:var(--muted)}
+.yoy{margin-top:26px}
+.yoy table td.n,.yoy table th.n{text-align:right;font-variant-numeric:tabular-nums;width:18%}
+.yoy td.up{color:var(--flag);font-weight:700}
+.yoy td.down{color:var(--brand-green);font-weight:700}
+.yoy .sub{font-size:.78rem;color:var(--muted);margin:-6px 0 10px}
 
 .section-title{font-family:'Archivo',sans-serif;font-weight:700;font-size:.85rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink);margin:0 0 12px}
 
@@ -370,6 +375,13 @@ const NEW_WINDOW_DAYS = 7;               // "new" = raised in the last 7 days
    the register and DEPTS in the Apps Script. */
 const DEPTS = ['Sales', 'Production', 'IT & Digital', 'Stores', 'Accounts', 'Suppliers', 'Procurement',
                'EMB', 'Logistics', 'DPD', 'H&B', 'ISO/QC', 'Other'];
+/* Issue categories on the NCR form, for the manager to pick again when moving an NCR. */
+const CATS = ['Input error', 'Process error', 'Pricing error', 'Missing item',
+              'Training issue', 'Supplier fault', 'Transit/delivery damage', 'Other'];
+/* Oct 2026 (2): moving an NCR now asks for the issue category again, clears the
+   investigation for the new department to fill in (the old text is kept in the
+   register's Reassignment history), and only an open NCR can be moved. The
+   front page gained a month-by-month table of last year against this year. */
 /* A department can be owned by more than one person — list them in an array. */
 const OWNERS = {
   "Sales":"Duncan", "Suppliers":"Duncan", "IT & Digital":"Ben",
@@ -591,7 +603,7 @@ function renderMainBody(){
       '</button>';
   });
 
-  html += '</div>';
+  html += '</div>' + yearOnYear(rows);
   wrap.innerHTML = html;
   wrap.querySelectorAll('.dept-card').forEach(b =>
     b.addEventListener('click', () => { view = { dept: b.dataset.dept, search: "", showClosed: false, metric: null, q: "", month: "", filter: null }; render(); window.scrollTo(0,0); }));
@@ -649,6 +661,34 @@ function renderBreakdown(){
         '</tbody></table>'
       : '<p class="none">Nothing to show.</p>') +
     '</div>';
+}
+
+/* Every NCR raised, month by month, last calendar year beside this one. Always
+   January to December of each year, not a rolling 24 months, so the same month
+   can be compared across years. */
+function yearOnYear(rows){
+  const now = new Date(), thisYear = now.getFullYear(), lastYear = thisYear - 1;
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const count = (y, m) => rows.filter(r => { const t = new Date(r.ts); return !isNaN(t) && t.getFullYear() === y && t.getMonth() === m; }).length;
+  const totals = { [lastYear]: 0, [thisYear]: 0 };
+  const cells = MONTHS.map((mn, m) => {
+    const a = count(lastYear, m), b = count(thisYear, m);
+    totals[lastYear] += a; totals[thisYear] += b;
+    const future = m > now.getMonth();
+    const diff = b - a;
+    const cls = future || !a ? '' : (diff > 0 ? ' up' : diff < 0 ? ' down' : '');
+    return '<tr><td>' + mn + '</td><td class="n">' + a + '</td><td class="n">' + (future ? '\u2013' : b) + '</td>' +
+      '<td class="n' + cls + '">' + (future || (!a && !b) ? '' : (diff > 0 ? '+' : '') + diff) + '</td></tr>';
+  }).join('');
+  const d = totals[thisYear] - totals[lastYear];
+  return '<div class="breakdown yoy"><h3>NCRs by month &mdash; ' + lastYear + ' and ' + thisYear + '</h3>' +
+    '<p class="sub">Everything raised, all departments. ' + thisYear + ' runs January to ' +
+      now.toLocaleDateString('en-GB', { month:'long' }) + ' so far.</p>' +
+    '<table><thead><tr><th>Month</th><th class="n">' + lastYear + '</th><th class="n">' + thisYear + '</th><th class="n">Change</th></tr></thead><tbody>' +
+    cells +
+    '<tr class="total"><td>Total</td><td class="n">' + totals[lastYear] + '</td><td class="n">' + totals[thisYear] + '</td>' +
+      '<td class="n">' + (totals[lastYear] ? (d > 0 ? '+' : '') + d : '') + '</td></tr>' +
+    '</tbody></table></div>';
 }
 
 function kpi(n, label, flagged){
@@ -1460,16 +1500,25 @@ function openDetail(r){
 function reassignBlock(r){
   const cur = String(r.dept || '').trim();
   const opts = DEPTS.filter(d => d !== cur);
+  if (!isLive(r)) return '<div class="reassign" id="reassign" hidden>' +
+      '<h3>Move ' + esc(r.ref) + ' to another department</h3>' +
+      '<p>A closed NCR can\u2019t be moved. Set Status to Outstanding above, save to the register, then open it again and move it.</p>' +
+      '<div class="actions"><button class="btn btn-cancel" type="button" id="raCancel">Close</button></div></div>';
+  const cats = CATS.indexOf(r.cat) > -1 || !r.cat ? CATS : [r.cat].concat(CATS);
   return '<div class="reassign" id="reassign" hidden>' +
       '<h3>Move ' + esc(r.ref) + ' to another department</h3>' +
-      '<p>It is currently against <b>' + esc(cur || 'no department') + '</b>. Everything written on it so far ' +
-        'comes with it, and it will no longer count against ' + esc(cur || 'that department') + '.</p>' +
+      '<p>It is currently against <b>' + esc(cur || 'no department') + '</b>. It will no longer count against ' +
+        esc(cur || 'that department') + '. The investigation so far (severity, root cause, actions, notes) is cleared ' +
+        'so the new department fills it in from scratch; what was written is kept in the register\u2019s reassignment history.</p>' +
       '<div class="form-grid">' +
         '<div class="field"><label>Move to</label><select id="ra_to"><option value="">Choose&hellip;</option>' +
           opts.map(d => '<option value="' + esc(d) + '">' + esc(d) + (ownerText(groupDept(d)) ? ' (' + esc(ownerText(groupDept(d))) + ')' : '') + '</option>').join('') +
         '</select></div>' +
+        '<div class="field"><label>Issue category</label><select id="ra_cat"><option value="">Choose&hellip;</option>' +
+          cats.map(c => '<option value="' + esc(c) + '"' + (c === r.cat ? ' selected' : '') + '>' + esc(c) + '</option>').join('') +
+        '</select></div>' +
         '<div class="field"><label>Your name</label><input type="text" id="ra_by" value="' + esc(readWho()) + '" placeholder="Who is moving it"></div>' +
-        '<div class="field wide"><label>Why</label><input type="text" id="ra_why" placeholder="e.g. Not a sales error \u2014 picked wrong in stores"></div>' +
+        '<div class="field"><label>Why</label><input type="text" id="ra_why" placeholder="e.g. Not a sales error \u2014 picked wrong in stores"></div>' +
       '</div>' +
       '<div class="actions"><span class="save-msg" id="raMsg"></span>' +
         '<button class="btn btn-cancel" type="button" id="raCancel">Cancel</button>' +
@@ -1485,32 +1534,35 @@ function wireReassign(ov, r, hasUnsaved, closePanel){
   const msg = box.querySelector('#raMsg');
   link.addEventListener('click', () => {
     box.hidden = !box.hidden;
-    if (!box.hidden){ box.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); box.querySelector('#ra_to').focus(); }
+    if (!box.hidden){ box.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); const f = box.querySelector('#ra_to'); if (f) f.focus(); }
   });
   box.querySelector('#raCancel').addEventListener('click', () => { box.hidden = true; });
-  box.querySelector('#raGo').addEventListener('click', async () => {
-    const to = box.querySelector('#ra_to').value, by = box.querySelector('#ra_by').value.trim(),
-          why = box.querySelector('#ra_why').value.trim();
+  const go = box.querySelector('#raGo');
+  if (!go) return;                                   /* closed NCR: the box only explains */
+  go.addEventListener('click', async () => {
+    const to = box.querySelector('#ra_to').value, cat = box.querySelector('#ra_cat').value,
+          by = box.querySelector('#ra_by').value.trim(), why = box.querySelector('#ra_why').value.trim();
     box.querySelectorAll('.field.invalid').forEach(f => f.classList.remove('invalid'));
     const bad = [];
-    if (!to) bad.push('ra_to'); if (!by) bad.push('ra_by'); if (!why) bad.push('ra_why');
+    if (!to) bad.push('ra_to'); if (!cat) bad.push('ra_cat'); if (!by) bad.push('ra_by'); if (!why) bad.push('ra_why');
     if (bad.length){
       bad.forEach(id => box.querySelector('#' + id).closest('.field').classList.add('invalid'));
-      msg.textContent = 'Choose a department, and say who is moving it and why'; msg.className = 'save-msg err';
+      msg.textContent = 'Choose a department and issue category, and say who is moving it and why'; msg.className = 'save-msg err';
       return;
     }
     if (hasUnsaved() && !window.confirm('You have changes above that haven\u2019t been saved to the register.\n\n' +
-        'Move the NCR anyway? Those changes stay on this device and will be waiting when you reopen it under ' + to + '.')) return;
+        'Move the NCR anyway? Unsaved changes are dropped \u2014 the investigation starts again under ' + to + '.')) return;
     if (!window.confirm('Move ' + r.ref + ' from ' + (r.dept || 'no department') + ' to ' + to + '?\n\n' +
-        'It will count under ' + to + ' from now on, and ' + (ownerText(groupDept(to)) || 'that department') + ' will own it.')) return;
+        'It will count under ' + to + ' from now on, ' + (ownerText(groupDept(to)) || 'that department') + ' will own it, ' +
+        'and the investigation written so far is cleared for them to fill in.')) return;
     writeWho(by);
-    const go = box.querySelector('#raGo');
     go.disabled = true; msg.textContent = 'Moving\u2026'; msg.className = 'save-msg';
     try {
       const res = await fetch(API_URL, { method: 'POST',
-        body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, action: 'reassign', to: to, by: by, reason: why }) });
+        body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, action: 'reassign', to: to, cat: cat, by: by, reason: why }) });
       const out = await res.json();
       if (!out.ok) throw new Error(out.error || 'Move failed');
+      clearDraft(r.ref);                             /* old department's unsaved notes no longer apply */
       closePanel();
       toast(r.ref + ' moved to ' + to);
       await load();      /* it drops out of this department's list and appears under the new one */
