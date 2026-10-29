@@ -381,7 +381,9 @@ const CATS = ['Input error', 'Process error', 'Pricing error', 'Missing item',
 /* Oct 2026 (2): moving an NCR now asks for the issue category again, clears the
    investigation for the new department to fill in (the old text is kept in the
    register's Reassignment history), and only an open NCR can be moved. The
-   front page gained a month-by-month table of last year against this year. */
+   front page gained a month-by-month table of last year against this year.
+   Oct 2026 (3): "What happened?" can be reworded as part of a move; the
+   original wording is kept in the register's reassignment history. */
 /* A department can be owned by more than one person — list them in an array. */
 const OWNERS = {
   "Sales":"Duncan", "Suppliers":"Duncan", "IT & Digital":"Ben",
@@ -1519,6 +1521,8 @@ function reassignBlock(r){
         '</select></div>' +
         '<div class="field"><label>Your name</label><input type="text" id="ra_by" value="' + esc(readWho()) + '" placeholder="Who is moving it"></div>' +
         '<div class="field"><label>Why</label><input type="text" id="ra_why" placeholder="e.g. Not a sales error \u2014 picked wrong in stores"></div>' +
+        '<div class="field wide"><label>What happened? &mdash; reword it if the NCR is really about something else</label>' +
+          '<textarea id="ra_what">' + esc(r.what) + '</textarea></div>' +
       '</div>' +
       '<div class="actions"><span class="save-msg" id="raMsg"></span>' +
         '<button class="btn btn-cancel" type="button" id="raCancel">Cancel</button>' +
@@ -1541,10 +1545,12 @@ function wireReassign(ov, r, hasUnsaved, closePanel){
   if (!go) return;                                   /* closed NCR: the box only explains */
   go.addEventListener('click', async () => {
     const to = box.querySelector('#ra_to').value, cat = box.querySelector('#ra_cat').value,
-          by = box.querySelector('#ra_by').value.trim(), why = box.querySelector('#ra_why').value.trim();
+          by = box.querySelector('#ra_by').value.trim(), why = box.querySelector('#ra_why').value.trim(),
+          what = box.querySelector('#ra_what').value.trim();
     box.querySelectorAll('.field.invalid').forEach(f => f.classList.remove('invalid'));
     const bad = [];
     if (!to) bad.push('ra_to'); if (!cat) bad.push('ra_cat'); if (!by) bad.push('ra_by'); if (!why) bad.push('ra_why');
+    if (!what) bad.push('ra_what');
     if (bad.length){
       bad.forEach(id => box.querySelector('#' + id).closest('.field').classList.add('invalid'));
       msg.textContent = 'Choose a department and issue category, and say who is moving it and why'; msg.className = 'save-msg err';
@@ -1559,7 +1565,7 @@ function wireReassign(ov, r, hasUnsaved, closePanel){
     go.disabled = true; msg.textContent = 'Moving\u2026'; msg.className = 'save-msg';
     try {
       const res = await fetch(API_URL, { method: 'POST',
-        body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, action: 'reassign', to: to, cat: cat, by: by, reason: why }) });
+        body: JSON.stringify({ key: APP_KEY, ref: r.ref, row: r.row, action: 'reassign', to: to, cat: cat, by: by, reason: why, what: what }) });
       const out = await res.json();
       if (!out.ok) throw new Error(out.error || 'Move failed');
       clearDraft(r.ref);                             /* old department's unsaved notes no longer apply */

@@ -106,7 +106,10 @@ Second pass, same day:
 
 - Only an open NCR (Outstanding or In Progress) can be moved. A closed one must be
   reopened in the app first.
-- The manager moving it picks the **Issue category** again.
+- The manager moving it picks the **Issue category** again, and can reword **What
+  happened?** so it describes what the new department is actually being asked to look
+  at (EMB raised one against Sales for not buying enough transfers; it turned out Stores
+  had not written them off). The original wording is kept on the Reassignment history line.
 - The investigation is cleared for the new department to fill in from scratch:
   Severity, Target Complete Date, Root Cause, Containment Action, Corrective Action,
   Verified by, Resolution notes. Status goes back to Open. What was cleared is kept,
