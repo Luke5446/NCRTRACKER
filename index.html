@@ -88,6 +88,11 @@ main{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
 .breakdown td:last-child,.breakdown th:last-child{text-align:right;font-variant-numeric:tabular-nums}
 .breakdown tr.total td{font-weight:800;border-bottom:none;border-top:2px solid var(--ink)}
 .breakdown .none{font-size:.88rem;color:var(--muted)}
+.breakdown .sub{font-size:.82rem;color:var(--muted);margin:-4px 0 8px}
+.breakdown tr.drill{cursor:pointer}
+.breakdown tr.drill:hover td,.breakdown tr.drill:focus td{background:#F4F6FA}
+.breakdown tr.drill td:first-child{color:var(--ink);font-weight:600}
+.breakdown .go-arrow{color:var(--muted);font-weight:800;margin-left:4px}
 .yoy{margin-top:26px}
 .yoy table td.n,.yoy table th.n{text-align:right;font-variant-numeric:tabular-nums;width:18%}
 .yoy td.up{color:var(--flag);font-weight:700}
@@ -383,7 +388,11 @@ const CATS = ['Input error', 'Process error', 'Pricing error', 'Missing item',
    register's Reassignment history), and only an open NCR can be moved. The
    front page gained a month-by-month table of last year against this year.
    Oct 2026 (3): "What happened?" can be reworded as part of a move; the
-   original wording is kept in the register's reassignment history. */
+   original wording is kept in the register's reassignment history.
+   Nov 2026: the front-page Late tile now means "raised last month or earlier
+   and still not closed" (a blank status counts as not closed). Tap it for the
+   split by department, then tap a department to see just its late NCRs. The
+   department Late tile means the same thing. */
 /* A department can be owned by more than one person — list them in an array. */
 const OWNERS = {
   "Sales":"Duncan", "Suppliers":"Duncan", "IT & Digital":"Ben",
@@ -434,7 +443,8 @@ function daysSince(iso){
   const t = new Date(iso); if (isNaN(t)) return 0;
   return Math.floor((Date.now() - t.getTime()) / 86400000);
 }
-function isLive(r){ return r.status === "Open" || r.status === "In Progress"; }
+/* Anything not closed is live — a blank status (never actioned) counts too. */
+function isLive(r){ return r.status !== "Closed"; }
 /* Closing needs all of these — the app refuses without them, and so does the
    sheet now. Older NCRs were closed by hand in the sheet before that, so some
    are missing a few; closedGaps() says which, so they can be finished off. */
@@ -446,7 +456,16 @@ function closedGaps(r){
   return CLOSE_NEEDS.filter(f => String(r[f[0]] == null ? '' : r[f[0]]).trim() === '').map(f => f[1]);
 }
 function isStale(r){ return r.status === "Open" && daysSince(r.ts) > STALE_DAYS; }
+/* Late = raised in a previous calendar month (or earlier) and still not closed.
+   A blank status counts as not closed. */
 function isLate(r){
+  if (r.status === 'Closed') return false;
+  const t = new Date(r.ts);
+  if (isNaN(t)) return false;
+  return t < monthStart(0);
+}
+/* Past its own target date — used on the NCR panel. */
+function pastTarget(r){
   if (r.status === 'Closed' || !r.target) return false;
   const t = new Date(r.target);
   if (isNaN(t)) return false;
@@ -536,7 +555,7 @@ function metrics(){
   return {
     last: { label: 'NCRs in ' + monthName(-1), test: r => inMonth(r, -1) },
     this: { label: 'NCRs in ' + monthName(0),  test: r => inMonth(r, 0) },
-    late: { label: 'Late', title: 'Late (past target date)', test: isLate, flag: true },
+    late: { label: 'Late', title: 'Late \u2014 raised before ' + monthName(0) + ', still not closed', test: isLate, flag: true },
     stale:{ label: 'Not actioned in ' + STALE_DAYS + ' days', test: isStale, flag: true }
   };
 }
@@ -655,14 +674,25 @@ function renderBreakdown(){
   matching.forEach(r => { const g = groupDept(r.dept); counts[g] = (counts[g] || 0) + 1; });
   const order = Object.keys(counts).sort((a,b) => counts[b] - counts[a] || (a < b ? -1 : 1));
 
+  /* Only the Late tile has a matching department filter to drill into. */
+  const drill = view.metric === 'late';
   wrap.innerHTML = '<div class="breakdown"><h3>' + esc(m.title || m.label) + ' &mdash; by department</h3>' +
     (order.length
-      ? '<table><thead><tr><th>Department</th><th>NCRs</th></tr></thead><tbody>' +
-        order.map(g => '<tr><td>' + esc(g) + '</td><td>' + counts[g] + '</td></tr>').join('') +
+      ? (drill ? '<p class="sub">Tap a department to see its late NCRs.</p>' : '') +
+        '<table><thead><tr><th>Department</th><th>NCRs</th></tr></thead><tbody>' +
+        order.map(g => '<tr' + (drill ? ' class="drill" data-dept="' + esc(g) + '" role="button" tabindex="0"' : '') + '>' +
+          '<td>' + esc(g) + (drill ? ' <span class="go-arrow">&rsaquo;</span>' : '') + '</td><td>' + counts[g] + '</td></tr>').join('') +
         '<tr class="total"><td>Total</td><td>' + matching.length + '</td></tr>' +
         '</tbody></table>'
       : '<p class="none">Nothing to show.</p>') +
     '</div>';
+  if (drill){
+    const go = g => { view = { dept: g, search: "", showClosed: false, metric: null, q: "", month: "", filter: 'late' }; render(); window.scrollTo(0,0); };
+    wrap.querySelectorAll('tr.drill').forEach(tr => {
+      tr.addEventListener('click', () => go(tr.dataset.dept));
+      tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); go(tr.dataset.dept); } });
+    });
+  }
 }
 
 /* Every NCR raised, month by month, last calendar year beside this one. Always
@@ -1010,9 +1040,9 @@ function summaryDoc(g, list, monthKey, all){
   /* closed by hand in the sheet with fields still blank */
   const incomplete = list.filter(r => closedGaps(r).length);
   const flags = [];
-  list.filter(isLate).forEach(r => flags.push([r, daysLate(r) + ' days past target']));
-  stale.forEach(r => { if (!isLate(r)) flags.push([r, daysSince(r.ts) + ' days, not actioned']); });
-  severe.forEach(r => { if (!isStale(r) && !isLate(r)) flags.push([r, r.sev + ', still open']); });
+  list.filter(pastTarget).forEach(r => flags.push([r, daysLate(r) + ' days past target']));
+  stale.forEach(r => { if (!pastTarget(r)) flags.push([r, daysSince(r.ts) + ' days, not actioned']); });
+  severe.forEach(r => { if (!isStale(r) && !pastTarget(r)) flags.push([r, r.sev + ', still open']); });
 
   if (!list.length && !carried.length){
     return '<div class="rp">' + reportHead(g, monthKey, 'NCR monthly summary') +
@@ -1230,9 +1260,9 @@ function caseHtml(r){
 
 function renderList(rs){
   const term = view.search.trim().toLowerCase();
-  let list = view.showClosed ? rs.slice() : rs.filter(isLive);
   /* a tile is tapped: show only those. All three exclude closed anyway. */
   const only = filterTest(view.filter);
+  let list = (view.showClosed || only) ? rs.slice() : rs.filter(isLive);
   if (only) list = list.filter(only);
 
   if (term){
